@@ -32,3 +32,33 @@ The report mentions `vw_single_customer` and
 `vw_customer_account_history`, but `Untitled.sql` does not define them. Their
 placeholder file therefore contains no invented view logic.
 
+BRONZE
+├── RAW_CRM_CUSTOMER
+├── RAW_BANKING_ACCOUNT
+├── RAW_LOAN
+├── RAW_KYC
+└── RAW_AML_SCREENING
+
+        ↓ cleansing / standardisation / reconciliation
+
+SILVER
+├── CUSTOMER_MASTER
+├── SOURCE_CUSTOMER_RECORD
+├── CUSTOMER_SOURCE_MATCH
+├── CUSTOMER_ATTRIBUTE_SOURCE
+├── CUSTOMER_HISTORY
+├── BANKING_ACCOUNT
+├── ACCOUNT_TRANSACTION
+├── LOAN
+├── KYC_VERIFICATION_RECORD
+├── SPECIAL_VERIFICATION_CASE
+├── AML_SCREENING_RESULT
+├── AML_CASE
+└── CUSTOMER_RISK_ASSESSMENT
+
+        ↓ aggregation / transformation
+
+GOLD
+├── DIM_CUSTOMER
+├── FACT_CUSTOMER_SNAPSHOT
+└── FACT_COMPLIANCE_EXCEPTION
