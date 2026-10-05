@@ -1,0 +1,10 @@
+bronze_record_reference,source_system_id,batch_id,source_customer_reference,source_record_version,operation_type,source_full_name,source_date_of_birth,source_email_address,source_phone_number,source_address,record_status,source_last_updated_at,ingested_at
+BR-AML-C-001,AMLKYC,B1-AMLKYC,KYC-001,1,I,Alice Wong,1985-03-12,alice.wong@example.test,0412001001,"18 Harbour Street, Sydney NSW 2000",ACTIVE,2026-09-01T07:40:00,2026-09-01T08:14:00
+BR-AML-C-002,AMLKYC,B1-AMLKYC,KYC-003,1,I,Maya Patel,1990-07-23,maya.patel@example.test,0412001003,"9 Ocean Avenue, Bondi NSW 2026",ACTIVE,2026-09-01T07:40:00,2026-09-01T08:14:00
+BR-AML-C-003,AMLKYC,B1-AMLKYC,KYC-004,1,I,Noah Chen,1979-11-05,noah.chen@example.test,0412001004,"5 Garden Road, Parramatta NSW 2150",ACTIVE,2026-09-01T07:40:00,2026-09-01T08:14:00
+BR-AML-C-004,AMLKYC,B1-AMLKYC,KYC-005,1,I,Olivia Brooks,1992-06-17,olivia.brooks@example.test,0412001005,"11 Lake Road, Chatswood NSW 2067",ACTIVE,2026-09-01T07:40:00,2026-09-01T08:14:00
+BR-AML-C-005,AMLKYC,B1-AMLKYC,KYC-006,1,I,Ethan Nguyen,1983-02-09,ethan.nguyen@example.test,0412001006,"27 Pine Street, Newtown NSW 2042",ACTIVE,2026-09-01T07:40:00,2026-09-01T08:14:00
+BR-AML-C-006,AMLKYC,B1-AMLKYC,KYC-009,1,I,Zoe Kim,1999-01-31,zoe.kim@example.test,0412001009,"8 Bridge Street, Sydney NSW 2000",ACTIVE,2026-09-01T07:40:00,2026-09-01T08:14:00
+BR-AML-C-007,AMLKYC,B1-AMLKYC,KYC-010,1,I,Grace Wilson,1981-12-04,grace.wilson@example.test,0412001010,"12 Park Avenue, Liverpool NSW 2170",ACTIVE,2026-09-01T07:40:00,2026-09-01T08:14:00
+BR-AML-C-008,AMLKYC,B1-AMLKYC,KYC-012,1,I,Leo Martin,1968-10-07,leo.martin@example.test,0412001012,"16 Bay Street, Rockdale NSW 2216",ACTIVE,2026-09-01T07:40:00,2026-09-01T08:14:00
+BR-AML-C-009,AMLKYC,B1-AMLKYC,KYC-014,1,I,Lucas Park,1991-04-19,lucas.park@example.test,0412001014,"7 North Street, Burwood NSW 2134",ACTIVE,2026-09-01T07:40:00,2026-09-01T08:14:00

@@ -1,0 +1,15 @@
+person_id,first_name,last_name,full_name,date_of_birth,email_address,phone_number,residential_address,scenario
+P001,Alice,Wong,Alice Wong,1985-03-12,alice.wong@example.test,0412001001,"18 Harbour Street, Sydney NSW 2000",baseline_three_sources
+P002,Daniel,Lee,Daniel Lee,1988-04-11,daniel.lee@example.test,0412001002,"42 King Street, Sydney NSW 2000",dob_conflict_review
+P003,Maya,Patel,Maya Patel,1990-07-23,maya.patel@example.test,0412001003,"9 Ocean Avenue, Bondi NSW 2026",address_survivorship
+P004,Noah,Chen,Noah Chen,1979-11-05,noah.chen@example.test,0412001004,"5 Garden Road, Parramatta NSW 2150",missing_kyc_document
+P005,Olivia,Brooks,Olivia Brooks,1992-06-17,olivia.brooks@example.test,0412001005,"11 Lake Road, Chatswood NSW 2067",aml_hit_and_overdraft
+P006,Ethan,Nguyen,Ethan Nguyen,1983-02-09,ethan.nguyen@example.test,0412001006,"27 Pine Street, Newtown NSW 2042",crm_email_update
+P007,Ava,Morgan,Ava Morgan,1995-09-28,ava.morgan@example.test,0412001007,"3 Hill Street, Surry Hills NSW 2010",crm_source_delete
+P008,Liam,Scott,Liam Scott,1975-08-14,liam.scott@example.test,0412001008,"61 River Road, Penrith NSW 2750",lending_only
+P009,Zoe,Kim,Zoe Kim,1999-01-31,zoe.kim@example.test,0412001009,"8 Bridge Street, Sydney NSW 2000",kyc_only
+P010,Grace,Wilson,Grace Wilson,1981-12-04,grace.wilson@example.test,0412001010,"12 Park Avenue, Liverpool NSW 2170",three_sources
+P011,Mia,Rivera,Mia Rivera,1993-05-20,mia.rivera@example.test,0412001011,"22 Church Street, Ryde NSW 2112",late_crm_insert
+P012,Leo,Martin,Leo Martin,1968-10-07,leo.martin@example.test,0412001012,"16 Bay Street, Rockdale NSW 2216",expired_kyc
+P013,Harper,Rose,Harper Rose,1987-03-02,harper.rose@example.test,0412001013,"19 Market Street, Sydney NSW 2000",crm_only
+P014,Lucas,Park,Lucas Park,1991-04-19,lucas.park@example.test,0412001014,"7 North Street, Burwood NSW 2134",kyc_only

@@ -1,0 +1,7 @@
+bronze_record_reference,source_system_id,batch_id,source_customer_reference,source_record_version,operation_type,source_full_name,source_date_of_birth,source_email_address,source_phone_number,source_address,record_status,source_last_updated_at,ingested_at
+BR-LEND-C-001,LEND,B1-LEND,LEND-001,1,I,"WONG, ALICE",1985-03-12,alice.wong@example.test,0412001001,"18 Harbour Street, Sydney NSW 2000",ACTIVE,2026-09-01T07:35:00,2026-09-01T08:12:00
+BR-LEND-C-002,LEND,B1-LEND,LEND-002,1,I,Daniel Lee,1988-04-17,daniel.l@example.test,0412001002,"42 King Street, Sydney NSW 2000",ACTIVE,2026-09-01T07:35:00,2026-09-01T08:12:00
+BR-LEND-C-003,LEND,B1-LEND,LEND-005,1,I,Olivia Brooks,1992-06-17,olivia.brooks@example.test,0412001005,"11 Lake Road, Chatswood NSW 2067",ACTIVE,2026-09-01T07:35:00,2026-09-01T08:12:00
+BR-LEND-C-004,LEND,B1-LEND,LEND-008,1,I,Liam Scott,1975-08-14,liam.scott@example.test,0412001008,"61 River Road, Penrith NSW 2750",ACTIVE,2026-09-01T07:35:00,2026-09-01T08:12:00
+BR-LEND-C-005,LEND,B1-LEND,LEND-010,1,I,Grace Wilson,1981-12-04,grace.wilson@example.test,0412001010,"12 Park Avenue, Liverpool NSW 2170",ACTIVE,2026-09-01T07:35:00,2026-09-01T08:12:00
+BR-LEND-C-006,LEND,B1-LEND,LEND-012,1,I,Leo Martin,1968-10-07,leo.martin@example.test,0412001012,"16 Bay Street, Rockdale NSW 2216",ACTIVE,2026-09-01T07:35:00,2026-09-01T08:12:00

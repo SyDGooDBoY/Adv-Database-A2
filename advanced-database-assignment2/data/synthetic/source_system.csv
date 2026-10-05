@@ -1,0 +1,4 @@
+source_system_id,system_name,system_type,system_description,system_owner,active_flag
+CRM,CRM Banking,CUSTOMER_AND_ACCOUNTS,Synthetic CRM and banking source,Prototype team,true
+LEND,Lending,LOANS,Synthetic lending source,Prototype team,true
+AMLKYC,AML/KYC,COMPLIANCE,Synthetic verification and screening source,Prototype team,true

@@ -1,0 +1,15 @@
+person_id,crm_reference,lending_reference,aml_kyc_reference,expected_handling
+P001,CRM-001,LEND-001,KYC-001,baseline_three_sources
+P002,CRM-002,LEND-002,,dob_conflict_review
+P003,CRM-003,,KYC-003,address_survivorship
+P004,CRM-004,,KYC-004,missing_kyc_document
+P005,CRM-005,LEND-005,KYC-005,aml_hit_and_overdraft
+P006,CRM-006,,KYC-006,crm_email_update
+P007,CRM-007,,,crm_source_delete
+P008,,LEND-008,,lending_only
+P009,,,KYC-009,kyc_only
+P010,CRM-010,LEND-010,KYC-010,three_sources
+P011,CRM-011,,,late_crm_insert
+P012,CRM-012,LEND-012,KYC-012,expired_kyc
+P013,CRM-013,,,crm_only
+P014,,,KYC-014,kyc_only

@@ -1,0 +1,14 @@
+bronze_record_reference,source_system_id,batch_id,source_customer_reference,source_record_version,operation_type,source_full_name,source_date_of_birth,source_email_address,source_phone_number,source_address,record_status,source_last_updated_at,ingested_at
+BR-CRM-001,CRM,B1-CRM,CRM-001,1,I,Alice Wong,1985-03-12,alice.wong@example.test,0412001001,"18 Harbour Street, Sydney NSW 2000",ACTIVE,2026-09-01T07:30:00,2026-09-01T08:10:00
+BR-CRM-002,CRM,B1-CRM,CRM-002,1,I,Daniel Lee,1988-04-11,daniel.lee@example.test,0412001002,"42 King Street, Sydney NSW 2000",ACTIVE,2026-09-01T07:30:00,2026-09-01T08:10:00
+BR-CRM-003,CRM,B1-CRM,CRM-003,1,I,Maya Patel,1990-07-23,maya.patel@example.test,0412001003,"4 Old Wharf Road, Sydney NSW 2000",ACTIVE,2026-09-01T07:30:00,2026-09-01T08:10:00
+BR-CRM-004,CRM,B1-CRM,CRM-004,1,I,Noah Chen,1979-11-05,noah.chen@example.test,0412001004,"5 Garden Road, Parramatta NSW 2150",ACTIVE,2026-09-01T07:30:00,2026-09-01T08:10:00
+BR-CRM-005,CRM,B1-CRM,CRM-005,1,I,Olivia Brooks,1992-06-17,olivia.brooks@example.test,0412001005,"11 Lake Road, Chatswood NSW 2067",ACTIVE,2026-09-01T07:30:00,2026-09-01T08:10:00
+BR-CRM-006,CRM,B1-CRM,CRM-006,1,I,Ethan Nguyen,1983-02-09,ethan.nguyen@example.test,0412001006,"27 Pine Street, Newtown NSW 2042",ACTIVE,2026-09-01T07:30:00,2026-09-01T08:10:00
+BR-CRM-007,CRM,B1-CRM,CRM-007,1,I,Ava Morgan,1995-09-28,ava.morgan@example.test,0412001007,"3 Hill Street, Surry Hills NSW 2010",ACTIVE,2026-09-01T07:30:00,2026-09-01T08:10:00
+BR-CRM-008,CRM,B1-CRM,CRM-010,1,I,Grace Wilson,1981-12-04,grace.wilson@example.test,0412001010,"12 Park Avenue, Liverpool NSW 2170",ACTIVE,2026-09-01T07:30:00,2026-09-01T08:10:00
+BR-CRM-009,CRM,B1-CRM,CRM-012,1,I,Leo Martin,1968-10-07,leo.martin@example.test,0412001012,"16 Bay Street, Rockdale NSW 2216",ACTIVE,2026-09-01T07:30:00,2026-09-01T08:10:00
+BR-CRM-010,CRM,B1-CRM,CRM-013,1,I,Harper Rose,1987-03-02,harper.rose@example.test,0412001013,"19 Market Street, Sydney NSW 2000",ACTIVE,2026-09-01T07:30:00,2026-09-01T08:10:00
+BR-CRM-011,CRM,B2-CRM,CRM-006,2,U,Ethan Nguyen,1983-02-09,ethan.nguyen.new@example.test,0412001006,"27 Pine Street, Newtown NSW 2042",ACTIVE,2026-09-15T07:10:00,2026-09-15T08:10:00
+BR-CRM-012,CRM,B2-CRM,CRM-007,2,D,Ava Morgan,1995-09-28,ava.morgan@example.test,0412001007,"3 Hill Street, Surry Hills NSW 2010",DELETED,2026-09-15T07:15:00,2026-09-15T08:11:00
+BR-CRM-013,CRM,B2-CRM,CRM-011,1,I,Mia Rivera,1993-05-20,mia.rivera@example.test,0412001011,"22 Church Street, Ryde NSW 2112",ACTIVE,2026-09-15T07:20:00,2026-09-15T08:12:00
