@@ -264,16 +264,16 @@ INSERT INTO silver.customer_master (
 SELECT DISTINCT
     a.customer_id,
     'PENDING SURVIVORSHIP',
-    NULL,
-    NULL,
-    NULL,
-    NULL,
-    NULL,
-    NULL,
-    NULL,
-    NULL,
+    NULL::date,
+    NULL::varchar(150),
+    NULL::varchar(50),
+    NULL::varchar(255),
+    NULL::varchar(100),
+    NULL::varchar(100),
+    NULL::varchar(20),
+    NULL::varchar(3),
     'PENDING_SURVIVORSHIP',
-    NULL,
+    NULL::date,
     CURRENT_TIMESTAMP,
     CURRENT_TIMESTAMP
 FROM tmp_member2_identity_assignment a
@@ -480,3 +480,4 @@ WHERE m.is_current_match = TRUE
 ORDER BY
     scr.source_system_id,
     scr.source_customer_reference;
+
