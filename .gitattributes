@@ -1,0 +1,13 @@
+# Keep line endings consistent for everyone working on this prototype.
+# SQL scripts and Markdown are checked out with the platform default and stored
+# with LF in the repository, so a Windows checkout does not report every file as
+# modified when core.autocrlf is enabled.
+* text=auto
+*.sql text
+*.md text
+*.mjs text
+*.py text
+*.csv text
+*.json text
+*.yaml text
+*.yml text
