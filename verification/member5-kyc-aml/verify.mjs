@@ -160,6 +160,7 @@ try {
         ('function', 'silver', 'detect_aml_screening_issues'),
         ('function', 'silver', 'compliance_rule_case_type'),
         ('function', 'silver', 'register_compliance_finding'),
+        ('function', 'silver', 'find_or_open_case'),
         ('function', 'silver', 'find_or_open_verification_case'),
         ('function', 'silver', 'find_or_open_aml_case'),
         ('function', 'silver', 'resolve_compliance_case'),
@@ -219,7 +220,7 @@ try {
 
   if (problems.length === 0) {
     console.log(
-      `  ok   5 tables, 3 views, 20 routines and ${columnTotal.rows[0].n} columns all carry a comment`,
+      `  ok   5 tables, 3 views, 21 routines and ${columnTotal.rows[0].n} columns all carry a comment`,
     );
   } else {
     failed += 1;
