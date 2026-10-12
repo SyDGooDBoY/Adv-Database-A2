@@ -78,34 +78,36 @@ report requires. Repeated findings for the same customer and issue type reuse
 the existing open case instead of opening a new one. Other validation failures
 remain quality records without a case.
 
+The two detection functions implement **18 rules**: 8 over KYC verification
+events and 10 over AML screening events.
+
+### KYC verification rules (8)
+
 | Rule | Finding | Case type | Severity |
 |---|---|---|---|
 | `KYC_EVENT_SUBJECT_REQUIRED` | no customer and no source customer record | — | BLOCKING |
 | `KYC_IDENTITY_LINK_MISMATCH` | customer and source record not the same identity | `IDENTITY_MISMATCH` | HIGH |
 | `KYC_VERIFICATION_TYPE_INVALID` | unknown verification type | — | MEDIUM |
 | `KYC_VERIFICATION_STATUS_INVALID` | unknown verification status | — | MEDIUM |
-| `KYC_VERIFICATION_EXPIRED` | expired on the reference date | `STATUS_DISCREPANCY` | HIGH |
-| `KYC_VERIFICATION_STATUS_DISCREPANCY` | successful on an already expired check | `STATUS_DISCREPANCY` | HIGH |
-| `KYC_VERIFICATION_INCOMPLETE` | status is not a completed successful check | `KYC_GAP` | MEDIUM |
+| `KYC_VERIFICATION_EXPIRED` | the check has lapsed at the reference date | `STATUS_DISCREPANCY` | HIGH |
+| `KYC_VERIFICATION_STATUS_DISCREPANCY` | successful check that cannot be relied on as recorded | `STATUS_DISCREPANCY` | HIGH |
+| `KYC_VERIFICATION_INCOMPLETE` | the check did not complete (pending, missing document, failed) | `KYC_GAP` | MEDIUM |
 | `KYC_VERIFICATION_UNRESOLVED_IDENTITY` | event not yet linked to a golden customer | — | LOW |
+
+### AML screening rules (10)
+
+| Rule | Finding | Case type | Severity |
+|---|---|---|---|
 | `AML_EVENT_SUBJECT_REQUIRED` | no customer and no source customer record | — | BLOCKING |
 | `AML_IDENTITY_LINK_MISMATCH` | customer and source record not the same identity | `IDENTITY_MISMATCH` | HIGH |
 | `AML_SCREENING_TYPE_INVALID` | unknown screening type | — | MEDIUM |
 | `AML_SCREENING_RESULT_INVALID` | unknown screening result | — | MEDIUM |
-| `AML_MATCH_SCORE_OUT_OF_RANGE` | score outside 0.0000-1.0000 | — | MEDIUM |
-| `AML_MATCH_SCORE_MISSING` | alert raised without a match score | — | MEDIUM |
 | `AML_REVIEW_FLAG_INCONSISTENT` | alert raised while review is not required | `STATUS_DISCREPANCY` | HIGH |
+| `AML_REVIEW_REQUIRED` | an alert that requires investigation | `AML_SCREENING_REVIEW` | MEDIUM |
 | `AML_CLEAR_SCREENING_WITH_REVIEW` | clear result flagged for review | `STATUS_DISCREPANCY` | MEDIUM |
 | `AML_CLEAR_SCREENING_SCORE_INCONSISTENT` | clear result carrying an alert-level score | `STATUS_DISCREPANCY` | MEDIUM |
-| `AML_SCREENING_UNRESOLVED_IDENTITY` | screening not yet linked to a golden customer | — | LOW |
-| `CASE_SUBJECT_REQUIRED` | case has no subject or trigger reference | — | BLOCKING |
-| `CASE_TYPE_INVALID` | unknown case type | — | MEDIUM |
-| `CASE_STATUS_INVALID` | unknown case status | — | MEDIUM |
-| `CASE_STATUS_RESOLUTION_MISMATCH` | resolved/closed state disagrees with the closing timestamp | — | HIGH |
-| `CASE_SUBJECT_REFERENCES_DISAGREE` | case links point at different customers | `IDENTITY_MISMATCH` | HIGH |
-| `AML_CASE_TRIGGER_REQUIRED` | no screening and no documented trigger reference | — | BLOCKING |
-| `AML_CASE_LIFECYCLE_MISMATCH` | `CLOSED` state disagrees with `closed_at` | — | HIGH |
-
+| `AML_MATCH_SCORE_OUT_OF_RANGE` | score outside 0.0000-1.0000 | — | MEDIUM |
+| `AML_MATCH_SCORE_MISSING` | alert raised without a match score | — | MEDIUM |
 BLOCKING findings prevent the affected event from being published to Silver.
 Every other finding is REPORTABLE: the event is published, the quality issue is
 retained, and a case is opened or reused when the rule maps to a case type. A
