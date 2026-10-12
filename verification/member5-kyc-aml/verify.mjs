@@ -163,6 +163,10 @@ try {
         ('function', 'silver', 'find_or_open_verification_case'),
         ('function', 'silver', 'find_or_open_aml_case'),
         ('function', 'silver', 'resolve_compliance_case'),
+        ('function', 'silver', 'resolve_event_identity'),
+        ('function', 'silver', 'customer_kyc_status'),
+        ('procedure', 'silver', 'stage_bronze_batch'),
+        ('procedure', 'silver', 'record_event_lineage'),
         ('procedure', 'silver', 'load_kyc_aml_customer_identity'),
         ('procedure', 'silver', 'publish_kyc_verification_batch'),
         ('procedure', 'silver', 'publish_aml_screening_batch'),
@@ -215,7 +219,7 @@ try {
 
   if (problems.length === 0) {
     console.log(
-      `  ok   5 tables, 3 views, 17 routines and ${columnTotal.rows[0].n} columns all carry a comment`,
+      `  ok   5 tables, 3 views, 20 routines and ${columnTotal.rows[0].n} columns all carry a comment`,
     );
   } else {
     failed += 1;

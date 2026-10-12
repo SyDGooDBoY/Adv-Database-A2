@@ -37,6 +37,9 @@ demonstrated before identity resolution is complete.
 9. `08_validation_tests.sql`
 10. `09_add_chinese_comments.sql`
 
+`REFACTORING_ZH.md` records the code-reduction pass: what was duplicated, what was
+extracted into shared steps, and the evidence that behaviour is unchanged.
+
 `09_add_chinese_comments.sql` attaches a Chinese comment to every table, column,
 view, function and procedure this module owns, so the structure is readable in
 CloudBeaver without opening the scripts. It is idempotent and may be run at any
