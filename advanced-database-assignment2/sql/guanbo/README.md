@@ -35,6 +35,13 @@ demonstrated before identity resolution is complete.
 7. `06_create_exception_fact.sql`
 8. `07_create_compliance_reporting_views.sql`
 9. `08_validation_tests.sql`
+10. `09_add_chinese_comments.sql`
+
+`09_add_chinese_comments.sql` attaches a Chinese comment to every table, column,
+view, function and procedure this module owns, so the structure is readable in
+CloudBeaver without opening the scripts. It is idempotent and may be run at any
+point after `00`-`07`. `TABLE_COMMENTS_ZH.md` in this directory explains the same
+structures in plain Chinese, table by table and column by column.
 
 Then execute one call per batch:
 
