@@ -119,75 +119,73 @@ BEGIN
 
   DROP TABLE IF EXISTS tmp_compliance_exception_fact;
 
+  -- 两类案件合成一张事实表。
+  --
+  -- 原先写成两个 UNION ALL 分支，每个分支各写一遍状态映射、客户代理键查找、
+  -- 账龄计算和结案日选择——同一个口径写两遍，容易改一处漏一处。现在 UNION ALL
+  -- 只负责"把两边的列名和取值统一"，后续计算只写一遍。
   CREATE TEMP TABLE tmp_compliance_exception_fact ON COMMIT DROP AS
+  WITH exception_case AS (
+    SELECT
+      'VERIFICATION' AS source_type,
+      investigation.verification_case_id AS verification_case_id,
+      NULL::varchar AS aml_case_id,
+      investigation.customer_id,
+      investigation.case_type,
+      investigation.case_status,
+      investigation.severity,
+      investigation.opened_at,
+      investigation.resolved_at AS closed_at
+    FROM silver.special_verification_case investigation
+
+    UNION ALL
+
+    SELECT
+      'AML',
+      NULL::varchar,
+      investigation.aml_case_id,
+      investigation.customer_id,
+      investigation.case_type,
+      investigation.case_status,
+      investigation.risk_level,
+      investigation.opened_at,
+      investigation.closed_at
+    FROM silver.aml_case investigation
+  )
   SELECT
-    gold.compliance_exception_fact_id('VERIFICATION', investigation.verification_case_id)
-      AS exception_fact_id,
+    gold.compliance_exception_fact_id(
+      exception_case.source_type,
+      COALESCE(exception_case.verification_case_id, exception_case.aml_case_id)
+    ) AS exception_fact_id,
     dimension.customer_key,
-    investigation.verification_case_id,
-    NULL::varchar AS aml_case_id,
-    'VERIFICATION' AS exception_source_type,
-    investigation.case_type AS exception_type,
-    CASE investigation.case_status
+    exception_case.verification_case_id,
+    exception_case.aml_case_id,
+    exception_case.source_type AS exception_source_type,
+    exception_case.case_type AS exception_type,
+    -- 异常状态是事实表自己对案件的看法，由案件状态映射而来
+    CASE exception_case.case_status
       WHEN 'OPEN' THEN 'OPEN'
       WHEN 'IN_REVIEW' THEN 'IN_REVIEW'
       WHEN 'RESOLVED' THEN 'RESOLVED'
       ELSE 'CLOSED'
     END AS exception_status,
-    investigation.severity,
-    investigation.opened_at::date AS opened_date,
-    investigation.resolved_at::date AS resolved_date,
+    exception_case.severity,
+    exception_case.opened_at::date AS opened_date,
+    exception_case.closed_at::date AS resolved_date,
     p_as_of_date AS as_of_date,
-    -- An exception cannot have been open for longer than the reporting period,
-    -- so the closing date used for the count is capped at the as-of date.
-    -- resolved_date still records when the case actually closed.
+    -- 账龄 = 结案日（未结案取报告基准日）− 开案日，并按报告基准日封顶，避免出现
+    -- "比报告期还久"的自相矛盾数字。resolved_date 仍记录真实结案日。
     GREATEST(
-      LEAST(COALESCE(investigation.resolved_at::date, p_as_of_date), p_as_of_date)
-        - investigation.opened_at::date,
+      LEAST(COALESCE(exception_case.closed_at::date, p_as_of_date), p_as_of_date)
+        - exception_case.opened_at::date,
       0
     ) AS days_open,
     clock_timestamp() AS last_updated_at
-  FROM silver.special_verification_case investigation
+  FROM exception_case
   LEFT JOIN LATERAL (
     SELECT customer_dimension.customer_key
     FROM gold.dim_customer customer_dimension
-    WHERE customer_dimension.customer_id = investigation.customer_id
-      AND customer_dimension.current_flag
-    ORDER BY customer_dimension.effective_from DESC, customer_dimension.customer_key DESC
-    LIMIT 1
-  ) dimension ON true
-
-  UNION ALL
-
-  SELECT
-    gold.compliance_exception_fact_id('AML', investigation.aml_case_id),
-    dimension.customer_key,
-    NULL::varchar,
-    investigation.aml_case_id,
-    'AML',
-    investigation.case_type,
-    CASE investigation.case_status
-      WHEN 'OPEN' THEN 'OPEN'
-      WHEN 'IN_REVIEW' THEN 'IN_REVIEW'
-      WHEN 'CLOSED' THEN 'CLOSED'
-      ELSE 'CLOSED'
-    END,
-    investigation.risk_level,
-    investigation.opened_at::date,
-    investigation.closed_at::date,
-    p_as_of_date,
-    -- Capped at the as-of date for the same reason as the verification branch.
-    GREATEST(
-      LEAST(COALESCE(investigation.closed_at::date, p_as_of_date), p_as_of_date)
-        - investigation.opened_at::date,
-      0
-    ),
-    clock_timestamp()
-  FROM silver.aml_case investigation
-  LEFT JOIN LATERAL (
-    SELECT customer_dimension.customer_key
-    FROM gold.dim_customer customer_dimension
-    WHERE customer_dimension.customer_id = investigation.customer_id
+    WHERE customer_dimension.customer_id = exception_case.customer_id
       AND customer_dimension.current_flag
     ORDER BY customer_dimension.effective_from DESC, customer_dimension.customer_key DESC
     LIMIT 1

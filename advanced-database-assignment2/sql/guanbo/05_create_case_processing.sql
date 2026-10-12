@@ -15,6 +15,163 @@
 
 -- Returns the SPECIAL_VERIFICATION_CASE representing a reportable KYC finding,
 -- opening one when no case exists yet for that KYC event and case type.
+-- 通用"查找或建立案件"步骤，两个专用函数共用。
+--
+-- 三段逻辑：按主体与案件类型找已有案件；找到就复用；找不到才生成编号并插入
+-- （编号由"事件 + 案件类型"算出，同一问题重复检测会落到同一编号）。
+-- 最后返回案件编号与触发类型，专用函数直接取用，不再各写一遍。
+CREATE OR REPLACE FUNCTION silver.find_or_open_case(
+  p_entity varchar,
+  p_case_type varchar,
+  p_record_id varchar,
+  p_rule_name varchar,
+  p_issue_description text,
+  p_severity varchar,
+  p_default_batch varchar DEFAULT NULL
+)
+RETURNS jsonb
+LANGUAGE plpgsql
+AS $find_or_open$
+DECLARE
+  v_customer_id varchar(50);
+  v_source_record_id varchar(50);
+  v_screening_id varchar(50);
+  v_customer_reference varchar(100);
+  v_screening_type varchar(50);
+  v_open_at timestamp;
+  v_trigger_type varchar(50);
+  v_table varchar;
+  v_id_column varchar;
+  v_prefix varchar;
+  v_case_id varchar(50);
+BEGIN
+  -- 取出主体信息，并定下要写哪张案件表
+  IF p_entity = 'KYC' THEN
+    SELECT verification.customer_id, verification.source_customer_record_id
+    INTO v_customer_id, v_source_record_id
+    FROM silver.kyc_verification_record verification
+    WHERE verification.kyc_verification_id = p_record_id;
+
+    v_table := 'silver.special_verification_case';
+    v_id_column := 'verification_case_id';
+    v_prefix := 'SVCR-';
+
+    v_trigger_type := CASE
+      WHEN v_customer_id IS NOT NULL THEN 'GOLDEN_CUSTOMER'
+      ELSE 'SOURCE_CUSTOMER_RECORD'
+    END;
+    -- 立案时间取触发事件的业务时间，重跑脚本不会让账龄凭空变大
+    v_open_at := COALESCE((
+      SELECT max(lineage.transformation_timestamp)
+      FROM silver.data_lineage_record lineage
+      WHERE lineage.target_record_reference = p_record_id
+        AND lineage.transformation_name = 'PUBLISH_KYC_VERIFICATION_EVENT'
+    ), clock_timestamp());
+  ELSIF p_entity = 'AML' THEN
+    SELECT
+      screening.customer_id,
+      screening.source_customer_record_id,
+      screening.source_screening_reference,
+      screening.screening_type
+    INTO v_customer_id, v_source_record_id, v_customer_reference, v_screening_type
+    FROM silver.aml_screening_result screening
+    WHERE screening.aml_screening_id = p_record_id;
+
+    v_screening_id := p_record_id;
+    v_table := 'silver.aml_case';
+    v_id_column := 'aml_case_id';
+    v_prefix := 'AMLC-';
+
+    v_trigger_type := CASE v_screening_type
+      WHEN 'SANCTIONS' THEN 'SANCTIONS_SCREENING'
+      WHEN 'PEP' THEN 'PEP_SCREENING'
+      WHEN 'WATCHLIST' THEN 'WATCHLIST_SCREENING'
+      WHEN 'ADVERSE_MEDIA' THEN 'ADVERSE_MEDIA_SCREENING'
+      ELSE 'SCREENING_ALERT'
+    END;
+    v_open_at := COALESCE((
+      SELECT max(lineage.transformation_timestamp)
+      FROM silver.data_lineage_record lineage
+      WHERE lineage.target_record_reference = p_record_id
+        AND lineage.transformation_name = 'PUBLISH_AML_SCREENING_EVENT'
+    ), clock_timestamp());
+  ELSE
+    RAISE EXCEPTION '不支持的类型 %，应为 KYC 或 AML', p_entity;
+  END IF;
+
+  -- 同一主体 + 同一案件类型只保留一个案件
+  EXECUTE format(
+    'SELECT %I FROM %s
+     WHERE case_type = $1
+       AND customer_id IS NOT DISTINCT FROM $2
+       AND source_customer_record_id IS NOT DISTINCT FROM $3
+     ORDER BY opened_at DESC, %I DESC
+     LIMIT 1',
+    v_id_column, v_table, v_id_column
+  )
+  INTO v_case_id
+  USING p_case_type, v_customer_id, v_source_record_id;
+
+  IF v_case_id IS NULL THEN
+    v_case_id := v_prefix || upper(substr(md5(p_record_id || ':' || p_case_type), 1, 16));
+
+    -- 案件严重程度用案件自己的量级，不出现 BLOCKING（那是数据问题的量级）
+    IF p_entity = 'KYC' THEN
+      INSERT INTO silver.special_verification_case (
+        verification_case_id, customer_id, source_customer_record_id, match_id,
+        kyc_verification_id, assigned_user_id, case_type, trigger_type,
+        case_reason, case_status, severity, opened_at, resolved_at, resolution_outcome
+      )
+      VALUES (
+        v_case_id, v_customer_id, v_source_record_id, NULL,
+        p_record_id, NULL, p_case_type, v_trigger_type,
+        left(concat(p_rule_name, ': ', p_issue_description), 1000),
+        'OPEN',
+        CASE p_severity
+          WHEN 'BLOCKING' THEN 'CRITICAL'
+          WHEN 'HIGH' THEN 'HIGH'
+          WHEN 'MEDIUM' THEN 'MEDIUM'
+          ELSE 'LOW'
+        END,
+        v_open_at, NULL, NULL
+      )
+      ON CONFLICT (verification_case_id) DO NOTHING;
+    ELSE
+      -- AML 案件的风险等级上限是 HIGH，所以 BLOCKING 映射为 HIGH 而非 CRITICAL
+      INSERT INTO silver.aml_case (
+        aml_case_id, customer_id, source_customer_record_id, aml_screening_id,
+        assigned_user_id, trigger_type, trigger_reference, case_type,
+        case_status, risk_level, opened_at, closed_at, case_outcome
+      )
+      VALUES (
+        v_case_id, v_customer_id, v_source_record_id, v_screening_id,
+        NULL, v_trigger_type,
+        left(concat(p_rule_name, ': ', v_customer_reference), 150),
+        p_case_type, 'OPEN',
+        CASE p_severity
+          WHEN 'BLOCKING' THEN 'HIGH'
+          WHEN 'HIGH' THEN 'HIGH'
+          WHEN 'MEDIUM' THEN 'MEDIUM'
+          ELSE 'LOW'
+        END,
+        v_open_at, NULL, NULL
+      )
+      ON CONFLICT (aml_case_id) DO NOTHING;
+    END IF;
+
+    RAISE NOTICE '新开案件 %（% / %）', v_case_id, p_case_type, p_record_id;
+  ELSE
+    RAISE NOTICE '复用已有案件 %（% / %）', v_case_id, p_case_type, p_record_id;
+  END IF;
+
+  RETURN jsonb_build_object('case_id', v_case_id, 'trigger_type', v_trigger_type);
+END;
+$find_or_open$;
+
+COMMENT ON FUNCTION silver.find_or_open_case(varchar, varchar, varchar, varchar, text, varchar, varchar) IS
+  '通用的查找或建立案件步骤：同一主体加同一案件类型只保留一个案件，已存在则复用。KYC 与 AML 共用。';
+
+-- 验证案件：包装通用步骤。KYC 类发现的案件号要回填到数据质量问题表，所以要返回编号。
 CREATE OR REPLACE FUNCTION silver.find_or_open_verification_case(
   p_case_type varchar,
   p_kyc_verification_id varchar,
@@ -23,107 +180,17 @@ CREATE OR REPLACE FUNCTION silver.find_or_open_verification_case(
   p_severity varchar
 )
 RETURNS varchar
-LANGUAGE plpgsql
+LANGUAGE sql
 AS $open_verification_case$
-DECLARE
-  v_customer_id varchar(50);
-  v_source_customer_record_id varchar(50);
-  v_case_id varchar(50);
-  v_severity varchar(20);
-  v_opened_at timestamp;
-BEGIN
-  SELECT
-    verification.customer_id,
-    verification.source_customer_record_id
-  INTO
-    v_customer_id,
-    v_source_customer_record_id
-  FROM silver.kyc_verification_record verification
-  WHERE verification.kyc_verification_id = p_kyc_verification_id;
-
-  IF NOT FOUND THEN
-    RAISE EXCEPTION 'Unknown published KYC verification record %', p_kyc_verification_id;
-  END IF;
-
-  v_severity := CASE p_severity
-    WHEN 'BLOCKING' THEN 'CRITICAL'
-    WHEN 'HIGH' THEN 'HIGH'
-    WHEN 'MEDIUM' THEN 'MEDIUM'
-    ELSE 'LOW'
-  END;
-
-  SELECT existing.verification_case_id
-  INTO v_case_id
-  FROM silver.special_verification_case existing
-  WHERE existing.kyc_verification_id = p_kyc_verification_id
-    AND existing.case_type = p_case_type
-  ORDER BY existing.opened_at DESC, existing.verification_case_id DESC
-  LIMIT 1;
-
-  IF v_case_id IS NOT NULL THEN
-    RAISE NOTICE 'Reusing verification case % for % on %',
-      v_case_id, p_case_type, p_kyc_verification_id;
-    RETURN v_case_id;
-  END IF;
-
-  v_opened_at := COALESCE((
-    SELECT max(lineage.transformation_timestamp)
-    FROM silver.data_lineage_record lineage
-    WHERE lineage.target_record_reference = p_kyc_verification_id
-      AND lineage.transformation_name = 'PUBLISH_KYC_VERIFICATION_EVENT'
-  ), clock_timestamp());
-
-  v_case_id := 'SVCR-' || upper(substr(md5(p_kyc_verification_id || ':' || p_case_type), 1, 16));
-
-  INSERT INTO silver.special_verification_case (
-    verification_case_id,
-    customer_id,
-    source_customer_record_id,
-    match_id,
-    kyc_verification_id,
-    assigned_user_id,
-    case_type,
-    trigger_type,
-    case_reason,
-    case_status,
-    severity,
-    opened_at,
-    resolved_at,
-    resolution_outcome
-  )
-  VALUES (
-    v_case_id,
-    v_customer_id,
-    v_source_customer_record_id,
-    NULL,
-    p_kyc_verification_id,
-    NULL,
-    p_case_type,
-    CASE
-      WHEN v_customer_id IS NOT NULL THEN 'GOLDEN_CUSTOMER'
-      ELSE 'SOURCE_CUSTOMER_RECORD'
-    END,
-    left(concat(p_rule_name, ': ', p_issue_description), 1000),
-    'OPEN',
-    v_severity,
-    v_opened_at,
-    NULL,
-    NULL
-  )
-  ON CONFLICT (verification_case_id) DO NOTHING;
-
-  RAISE NOTICE 'Opened verification case % for % on %',
-    v_case_id, p_case_type, p_kyc_verification_id;
-
-  RETURN v_case_id;
-END;
+  SELECT silver.find_or_open_case(
+    'KYC', p_case_type, p_kyc_verification_id, p_rule_name, p_issue_description, p_severity
+  ) ->> 'case_id';
 $open_verification_case$;
 
 COMMENT ON FUNCTION silver.find_or_open_verification_case(varchar, varchar, varchar, text, varchar) IS
-  'Returns the verification case for one KYC event and case type, opening it when it does not exist yet.';
+  '查找或建立验证案件并返回案件编号。同一验证事件加同一案件类型只保留一个案件。';
 
--- Returns the AML_CASE investigating a screening alert, opening one when the
--- event has no case of that type yet.
+-- AML 案件：数据质量问题表里没有对应列可回填，所以只建案、不回填。
 CREATE OR REPLACE FUNCTION silver.find_or_open_aml_case(
   p_case_type varchar,
   p_aml_screening_id varchar,
@@ -132,111 +199,15 @@ CREATE OR REPLACE FUNCTION silver.find_or_open_aml_case(
   p_severity varchar
 )
 RETURNS varchar
-LANGUAGE plpgsql
+LANGUAGE sql
 AS $open_aml_case$
-DECLARE
-  v_customer_id varchar(50);
-  v_source_customer_record_id varchar(50);
-  v_customer_reference varchar(100);
-  v_screening_type varchar(50);
-  v_case_id varchar(50);
-  v_severity varchar(20);
-  v_opened_at timestamp;
-BEGIN
-  SELECT
-    screening.customer_id,
-    screening.source_customer_record_id,
-    screening.source_screening_reference,
-    screening.screening_type
-  INTO
-    v_customer_id,
-    v_source_customer_record_id,
-    v_customer_reference,
-    v_screening_type
-  FROM silver.aml_screening_result screening
-  WHERE screening.aml_screening_id = p_aml_screening_id;
-
-  IF NOT FOUND THEN
-    RAISE EXCEPTION 'Unknown published AML screening result %', p_aml_screening_id;
-  END IF;
-
-  v_severity := CASE p_severity
-    WHEN 'BLOCKING' THEN 'CRITICAL'
-    WHEN 'HIGH' THEN 'HIGH'
-    WHEN 'MEDIUM' THEN 'MEDIUM'
-    ELSE 'LOW'
-  END;
-
-  SELECT existing.aml_case_id
-  INTO v_case_id
-  FROM silver.aml_case existing
-  WHERE existing.aml_screening_id = p_aml_screening_id
-    AND existing.case_type = p_case_type
-  ORDER BY existing.opened_at DESC, existing.aml_case_id DESC
-  LIMIT 1;
-
-  IF v_case_id IS NOT NULL THEN
-    RAISE NOTICE 'Reusing AML case % for % on screening %',
-      v_case_id, p_case_type, p_aml_screening_id;
-    RETURN v_case_id;
-  END IF;
-
-  v_opened_at := COALESCE((
-    SELECT max(lineage.transformation_timestamp)
-    FROM silver.data_lineage_record lineage
-    WHERE lineage.target_record_reference = p_aml_screening_id
-      AND lineage.transformation_name = 'PUBLISH_AML_SCREENING_EVENT'
-  ), clock_timestamp());
-
-  v_case_id := 'AMLC-' || upper(substr(md5(p_aml_screening_id || ':' || p_case_type), 1, 16));
-
-  INSERT INTO silver.aml_case (
-    aml_case_id,
-    customer_id,
-    source_customer_record_id,
-    aml_screening_id,
-    assigned_user_id,
-    trigger_type,
-    trigger_reference,
-    case_type,
-    case_status,
-    risk_level,
-    opened_at,
-    closed_at,
-    case_outcome
-  )
-  VALUES (
-    v_case_id,
-    v_customer_id,
-    v_source_customer_record_id,
-    p_aml_screening_id,
-    NULL,
-    CASE
-      WHEN v_screening_type = 'SANCTIONS' THEN 'SANCTIONS_SCREENING'
-      WHEN v_screening_type = 'PEP' THEN 'PEP_SCREENING'
-      WHEN v_screening_type = 'WATCHLIST' THEN 'WATCHLIST_SCREENING'
-      WHEN v_screening_type = 'ADVERSE_MEDIA' THEN 'ADVERSE_MEDIA_SCREENING'
-      ELSE 'SCREENING_ALERT'
-    END,
-    left(concat(p_rule_name, ': ', v_customer_reference), 150),
-    p_case_type,
-    'OPEN',
-    CASE WHEN v_severity = 'CRITICAL' THEN 'HIGH' ELSE v_severity END,
-    v_opened_at,
-    NULL,
-    NULL
-  )
-  ON CONFLICT (aml_case_id) DO NOTHING;
-
-  RAISE NOTICE 'Opened AML case % for % on screening %',
-    v_case_id, p_case_type, p_aml_screening_id;
-
-  RETURN v_case_id;
-END;
+  SELECT silver.find_or_open_case(
+    'AML', p_case_type, p_aml_screening_id, p_rule_name, p_issue_description, p_severity
+  ) ->> 'case_id';
 $open_aml_case$;
 
 COMMENT ON FUNCTION silver.find_or_open_aml_case(varchar, varchar, varchar, text, varchar) IS
-  'Returns the AML case investigating one screening event and case type, opening it when it does not exist yet.';
+  '查找或建立 AML 调查案件并返回案件编号。复用逻辑与验证案件一致。';
 
 -- Dispatches a registered finding to the correct case table. Returns the
 -- verification case identifier for KYC findings and NULL for AML findings,

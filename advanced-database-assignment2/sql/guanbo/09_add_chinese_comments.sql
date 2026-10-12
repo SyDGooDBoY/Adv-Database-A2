@@ -219,6 +219,8 @@ COMMENT ON FUNCTION silver.compliance_rule_case_type(varchar) IS
   'è§„åˆ™åˆ°æ¡ˆä»¶ç±»åž‹çš„å”¯ä¸€æ˜ å°„ï¼ˆæŠ¥å‘Šå£å¾„çš„å•ä¸€æ¥æºï¼‰ã€‚è¿”å›ž NULL è¡¨ç¤ºè¯¥è§„åˆ™åªç™»è®°è´¨é‡é—®é¢˜ã€ä¸å»ºæ¡ˆä»¶ï¼Œä¾‹å¦‚ LOW çº§çš„"èº«ä»½å°šæœªåˆå¹¶"æç¤ºã€‚';
 COMMENT ON FUNCTION silver.register_compliance_finding(varchar, varchar, varchar, varchar, varchar, varchar, varchar, varchar, text, varchar, varchar) IS
   'æŠŠä¸€æ¡æ ¡éªŒå‘çŽ°ç™»è®°ä¸ºæ•°æ®è´¨é‡é—®é¢˜ï¼ˆå†™å…¥ silver.data_quality_issueï¼‰ã€‚é—®é¢˜ç¼–å·ç”±"æ‰¹æ¬¡ + è§„åˆ™ + è®°å½•"ç”Ÿæˆï¼Œé‡è·‘åªæ›´æ–°åŒä¸€è¡Œï¼›ç™»è®°æ—¶æ¡ˆä»¶å·ç•™ç©ºï¼Œç”±æ¡ˆä»¶å¤„ç†æ­¥éª¤å›žå¡«ã€‚è¿”å›žè¯¥è§„åˆ™å¯¹åº”çš„æ¡ˆä»¶ç±»åž‹ã€‚';
+COMMENT ON FUNCTION silver.find_or_open_case(varchar, varchar, varchar, varchar, text, varchar, varchar) IS
+  '通用的查找或建立案件步骤：按主体与案件类型查找已有案件，找到就复用，找不到才生成编号并插入。KYC 与 AML 两个专用函数共用，保证"同一问题只开一个案件"的口径一致。';
 COMMENT ON FUNCTION silver.find_or_open_verification_case(varchar, varchar, varchar, text, varchar) IS
   'æŸ¥æ‰¾æˆ–å»ºç«‹éªŒè¯æ¡ˆä»¶ï¼šåŒä¸€éªŒè¯äº‹ä»¶åŠ åŒä¸€æ¡ˆä»¶ç±»åž‹åªä¿ç•™ä¸€ä¸ªæ¡ˆä»¶ï¼Œå·²å­˜åœ¨åˆ™å¤ç”¨ã€‚è¿™æ ·åŒä¸€é—®é¢˜é‡å¤å‘çŽ°ä¸ä¼šäº§ç”Ÿä¸€å †é‡å¤æ¡ˆä»¶ã€‚';
 COMMENT ON FUNCTION silver.find_or_open_aml_case(varchar, varchar, varchar, text, varchar) IS
