@@ -1,0 +1,3 @@
+﻿# Verification harness for the Member 5 module. The harness itself is kept so the
+# checks can be reproduced; the installed dependencies are not.
+node_modules/
