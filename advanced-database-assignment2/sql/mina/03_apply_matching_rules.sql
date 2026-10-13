@@ -1,13 +1,12 @@
--- Module 2: Customer indentity matching
--- Step 3: Convert candidate evidence into a matching decision
+-- Module 2: CUSTOMER IDENTITY MATCHING
+-- Step 3: Apply simple deterministic matching rules
 
 CREATE OR REPLACE VIEW silver.v_member2_pair_decisions AS
 SELECT
     c.*,
 
-    -- Rules are checked from highest-risk / strongest evidence downward
+    -- The conflict rule is checked first
     CASE
-        -- Example: Daniel has same name + phone but conflicting DOB
         WHEN dob_conflict AND name_match AND phone_match
             THEN 'PENDING_REVIEW'
 
@@ -26,7 +25,6 @@ SELECT
         ELSE 'NO_MATCH'
     END AS pair_decision,
 
-    -- Simple confidence values make the chosen rule visible in the prototype
     CASE
         WHEN dob_conflict AND name_match AND phone_match THEN 0.7000
         WHEN dob_match AND email_match AND phone_match   THEN 0.9900
@@ -36,7 +34,7 @@ SELECT
         ELSE 0.0000
     END::decimal(5,4) AS pair_confidence_score,
 
-    -- Store the exact rule for auditability and explanation
+    -- Save the rule so the decision can be explained later.
     CASE
         WHEN dob_conflict AND name_match AND phone_match
             THEN 'DOB_CONFLICT_NAME_PHONE_MATCH'
@@ -54,7 +52,7 @@ SELECT
 FROM silver.v_member2_match_candidates c;
 
 
--- Show only decisions that require action
+-- Show only decisions that need action.
 SELECT
     source_a,
     source_ref_a,

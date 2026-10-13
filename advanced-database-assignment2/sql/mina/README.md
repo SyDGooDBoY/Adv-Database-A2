@@ -1,32 +1,36 @@
-# Member 2 - Commented Version
+# Member 2 - Final Version
 
-This version keeps the same integration boundary and table/view interfaces used by the team, but adds comments intended for demonstration.
+## What each file does
 
-## Run order
+### 01
+Moves successful Bronze customer versions into `silver.source_customer_record`.
 
-After shared setup and Module 1:
+### 02
+Standardises name, DOB, email, phone and address for matching, while preserving the original source values.
 
-1. `01_standardise_source_customer_records.sql`
-2. `02_prepare_matching_candidates.sql`
-3. `03_apply_matching_rules.sql`
-4. `04_assign_unified_customers.sql`
-5. `05_validation_tests.sql`
+### 03
+Applies simple deterministic rules:
+- strong agreement -> `ACCEPTED`
+- DOB conflict + same name/phone -> `PENDING_REVIEW`
+- otherwise -> `NO_MATCH`
 
+### 04
+Assigns one enterprise `customer_id` to accepted records using normal SQL grouping.
+There is no Neo4j, no graph database, and no recursive graph logic.
 
-## Compatibility
+It only creates placeholder rows in `customer_master`.
+Member 3 still owns survivorship and authoritative customer attributes.
 
-The scripts continue to use the existing shared objects:
+### 05
+Runs simple validation queries for:
+- retained versions
+- current records
+- enterprise customer count
+- Alice
+- Daniel
+- Ethan
+- Ava
 
-- `silver.source_customer_record`
-- `silver.customer_master`
-- `silver.customer_source_match`
-- `silver.ingestion_batch`
+## Short explanation
 
-and the existing Module 2 view names:
-
-- `silver.v_member2_bronze_customer_versions`
-- `silver.v_member2_matching_input`
-- `silver.v_member2_match_candidates`
-- `silver.v_member2_pair_decisions`
-
-The explicit `NULL::date` / `NULL::varchar(...)` casts are included in Step 4 to avoid the PostgreSQL type-resolution issue reported during integration testing.
+> My module works in the Silver layer. I first retain the successful Bronze customer versions, then standardise fields such as name, email, phone and address before matching. I compare records across CRM, Lending and AML/KYC using deterministic rules. Strong matches are accepted, while conflicting information such as Daniel's DOB difference is sent for manual review. Accepted source records are grouped under one enterprise customer ID. I only create a placeholder customer master row because final attribute survivorship belongs to Module 3.
