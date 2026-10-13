@@ -1,7 +1,6 @@
--- PostgreSQL 15+
--- Member 1: reusable simulated-CDC procedure with Bronze retention,
--- successful-only watermark advancement, failure logging and safe reruns.
+-- Creates the reusable incremental CDC process, including validation, failure logging and watermark control.
 
+-- Counts all raw business records retained in Bronze for one batch.
 CREATE OR REPLACE FUNCTION silver.count_bronze_batch_records(
   p_batch_id varchar
 )
@@ -29,6 +28,7 @@ AS $count_records$
   ) batch_rows;
 $count_records$;
 
+-- Marks a batch as failed without advancing its watermark and records a blocking quality issue.
 CREATE OR REPLACE FUNCTION silver.record_load_failure(
   p_batch_id varchar,
   p_source_system_id varchar,
@@ -110,6 +110,7 @@ BEGIN
 END;
 $record_failure$;
 
+-- Stages, validates and publishes one simulated CDC batch with safe retry behaviour.
 CREATE OR REPLACE PROCEDURE silver.process_incremental_batch(
   p_batch_id varchar,
   p_force_failure boolean DEFAULT FALSE
@@ -128,6 +129,7 @@ DECLARE
   v_bad_sequence_count integer;
   v_error_message text;
 BEGIN
+  -- Loads the source batch specification and skips batches already committed successfully.
   SELECT *
   INTO v_spec
   FROM source_systems.ingestion_batch
@@ -154,6 +156,7 @@ BEGIN
     RETURN;
   END IF;
 
+  -- Reads the last committed watermark and initialises the Silver control row as RUNNING.
   SELECT watermark_end
   INTO v_previous_watermark
   FROM silver.vw_latest_successful_watermark
@@ -222,6 +225,7 @@ BEGIN
     watermark_start = EXCLUDED.watermark_start,
     watermark_end = NULL;
 
+  -- Retains the batch controls, raw records and CDC events in Bronze before validation.
   INSERT INTO bronze.ingestion_batch
   SELECT *
   FROM source_systems.ingestion_batch
@@ -266,6 +270,7 @@ BEGIN
   WHERE batch_id = p_batch_id
   ON CONFLICT (change_event_id) DO NOTHING;
 
+  -- Provides a controlled failure after staging to demonstrate Bronze retention and retry.
   IF p_force_failure THEN
     PERFORM silver.record_load_failure(
       p_batch_id,
@@ -278,6 +283,7 @@ BEGIN
   END IF;
 
   BEGIN
+    -- Validates row counts, operation codes, source ownership, payload references and event sequences.
     v_raw_count := silver.count_bronze_batch_records(p_batch_id);
 
     SELECT count(*)::integer
@@ -373,6 +379,7 @@ BEGIN
        OR max_sequence - min_sequence + 1 <> event_count
        OR min_sequence <> prior_max_sequence + 1;
 
+    -- Combines all validation failures into one batch-level error message.
     v_error_message := NULL;
 
     IF v_spec.watermark_start IS DISTINCT FROM v_previous_watermark THEN
@@ -450,6 +457,7 @@ BEGIN
       RETURN;
     END IF;
 
+    -- Publishes valid CDC events, commits the watermark and resolves earlier retryable issues.
     INSERT INTO silver.cdc_change_event (
       change_event_id,
       source_system_id,
@@ -503,6 +511,7 @@ BEGIN
       v_spec.watermark_end;
   EXCEPTION
     WHEN OTHERS THEN
+      -- Converts unexpected runtime errors into the same failed-batch control state.
       GET STACKED DIAGNOSTICS v_error_message = MESSAGE_TEXT;
       PERFORM silver.record_load_failure(
         p_batch_id,
@@ -517,4 +526,3 @@ $process_batch$;
 
 COMMENT ON PROCEDURE silver.process_incremental_batch(varchar, boolean) IS
   'Stages one simulated CDC batch in Bronze, validates it, publishes valid events to Silver and advances the watermark only after success.';
-

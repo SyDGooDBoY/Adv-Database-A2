@@ -1,13 +1,8 @@
--- PostgreSQL 15+
--- Member 1 demonstration: force B2-CRM to fail after Bronze staging, prove
--- that its watermark did not advance, then safely retry the same batch.
+-- Demonstrates B2-CRM failure, retained Bronze data, retry and idempotency.
 
 CALL silver.process_incremental_batch('B2-CRM', TRUE);
 
--- Expected after forced failure:
---   load_status = FAILED
---   watermark_end IS NULL
---   Bronze rows remain available
+-- Shows the failed batch state, retained data and unchanged committed watermark.
 SELECT
   batch_id,
   source_system_id,
@@ -27,12 +22,13 @@ SELECT
    FROM silver.vw_latest_successful_watermark
    WHERE source_system_id = 'CRM') AS committed_watermark_after_failure;
 
--- Retry succeeds using the already-staged Bronze rows.
+-- Retries the staged batch.
 CALL silver.process_incremental_batch('B2-CRM', FALSE);
 
--- A third call proves idempotency: the procedure detects SUCCEEDED and skips.
+-- Repeats the call to verify idempotency.
 CALL silver.process_incremental_batch('B2-CRM', FALSE);
 
+-- Displays the successful final batch state and published CRM CDC events.
 SELECT
   batch_id,
   source_system_id,
@@ -48,4 +44,3 @@ SELECT
   count(*) AS silver_crm_cdc_events
 FROM silver.cdc_change_event
 WHERE batch_id = 'B2-CRM';
-

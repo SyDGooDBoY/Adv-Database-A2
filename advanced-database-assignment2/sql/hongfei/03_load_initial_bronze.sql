@@ -1,9 +1,8 @@
--- PostgreSQL 15+
--- Member 1: load INITIAL (B1) records into the append-only Bronze layer and
--- publish successful initial control records to Silver.
+-- Loads initial B1 data into Bronze and publishes successful load controls to Silver.
 
 BEGIN;
 
+-- Retains source metadata and initial batch definitions in Bronze.
 INSERT INTO bronze.source_system
 SELECT *
 FROM source_systems.source_system
@@ -15,6 +14,7 @@ FROM source_systems.ingestion_batch
 WHERE load_type = 'INITIAL'
 ON CONFLICT (batch_id) DO NOTHING;
 
+-- Copies all initial raw business records into the append-only Bronze tables.
 INSERT INTO bronze.raw_crm_customer
 SELECT r.*
 FROM source_systems.raw_crm_customer r
@@ -71,6 +71,7 @@ JOIN source_systems.ingestion_batch b USING (batch_id)
 WHERE b.load_type = 'INITIAL'
 ON CONFLICT (bronze_record_reference) DO NOTHING;
 
+-- Confirms each initial batch contains the number of raw records declared by its control row.
 DO $validate_initial$
 DECLARE
   v_batch source_systems.ingestion_batch%ROWTYPE;
@@ -113,6 +114,7 @@ BEGIN
 END
 $validate_initial$;
 
+-- Publishes the authoritative source-system catalogue to Silver.
 INSERT INTO silver.source_system (
   source_system_id,
   system_name,
@@ -136,6 +138,7 @@ ON CONFLICT (source_system_id) DO UPDATE SET
   system_owner = EXCLUDED.system_owner,
   active_flag = EXCLUDED.active_flag;
 
+-- Marks validated initial batches as successfully processed in Silver.
 INSERT INTO silver.ingestion_batch (
   batch_id,
   source_system_id,
@@ -165,6 +168,7 @@ ON CONFLICT (batch_id) DO NOTHING;
 
 COMMIT;
 
+-- Displays the published initial-batch status and watermarks.
 SELECT
   batch_id,
   source_system_id,
@@ -175,4 +179,3 @@ SELECT
 FROM silver.ingestion_batch
 WHERE load_type = 'INITIAL'
 ORDER BY source_system_id;
-
