@@ -1,7 +1,6 @@
--- PostgreSQL 15+
--- Member 1: enforce load-control states and expose the latest committed
--- watermark for each source system.
+-- Prepares the control objects required by the incremental-load pipeline.
 
+-- Enforces valid batch types, lifecycle states, record counts and CDC operations.
 DO $controls$
 BEGIN
   IF NOT EXISTS (
@@ -77,6 +76,7 @@ BEGIN
 END
 $controls$;
 
+-- Supports batch-status, watermark and Bronze CDC lookups.
 CREATE INDEX IF NOT EXISTS ix_ingestion_batch_source_status_completed
   ON silver.ingestion_batch
   (source_system_id, load_status, completed_at DESC);
@@ -84,6 +84,7 @@ CREATE INDEX IF NOT EXISTS ix_ingestion_batch_source_status_completed
 CREATE INDEX IF NOT EXISTS ix_bronze_cdc_batch
   ON bronze.cdc_change_event (batch_id);
 
+-- Exposes the most recent committed watermark for each source system.
 CREATE OR REPLACE VIEW silver.vw_latest_successful_watermark AS
 SELECT DISTINCT ON (source_system_id)
   source_system_id,
@@ -96,4 +97,3 @@ ORDER BY source_system_id, completed_at DESC, batch_id DESC;
 
 COMMENT ON VIEW silver.vw_latest_successful_watermark IS
   'Latest committed watermark per source; failed and running batches are excluded.';
-

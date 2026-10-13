@@ -1,22 +1,24 @@
-# Member 1 - Incremental Synchronisation and Load Control
+# Member 1 — Incremental Loading and CDC
 
-This module implements the report's Member 1 scope in PostgreSQL:
+This folder contains the Source-to-Bronze part of the project. It loads the
+sample data, keeps the raw records in Bronze, and processes the second batch as
+simulated CDC.
 
-- source-to-Bronze mapping and initial loading;
-- ingestion-batch status and record-count control;
-- simulated CDC for inserts, updates and deletes;
-- append-only Bronze retention;
-- successful-only watermark advancement;
-- idempotent reruns, failure logging and retry;
-- validation queries suitable for report screenshots.
+The main idea is simple: raw data is kept even when a batch fails, but the
+watermark only moves forward after the batch has passed validation.
 
-## Prerequisite
+## Before running these scripts
 
-Run every script in `../00_shared_setup/` from `00` through `49` before this
-module. The shared scripts create the Source, Bronze and Silver control tables
-used here.
+Run the shared setup scripts in `../00_shared_setup/` from `00` to `49` first.
+They create the Source, Bronze and Silver tables used here.
+
+The sample CSV data has already been converted into `INSERT` statements in
+`02_seed_source_data.sql`, so the scripts can be run directly in CloudBeaver.
+There is no need to configure a server-side CSV path.
 
 ## Run order
+
+Run the files in this order:
 
 1. `01_add_incremental_controls.sql`
 2. `02_seed_source_data.sql`
@@ -26,57 +28,82 @@ used here.
 6. `06_run_remaining_incremental_batches.sql`
 7. `07_validation_tests.sql`
 
-`02_seed_source_data.sql` contains PostgreSQL `INSERT` statements generated
-from the supplied CSV files. This makes the prototype runnable in CloudBeaver
-without requiring PostgreSQL server access to a local Windows CSV path.
+The first four files set everything up. Files `05` and `06` run the demo
+batches, and file `07` checks the final result.
 
-## Layer ownership
+## What the scripts do
 
-- `source_systems`: simulated operational input, including the supplied batch
-  specifications and CDC events.
-- `bronze`: append-only raw landing records. Delete operations are retained as
-  `operation_type = 'D'`; no historical row is physically deleted.
-- `silver.source_system`, `silver.ingestion_batch` and
-  `silver.cdc_change_event`: authoritative integration-control records used by
-  downstream modules.
+`01_add_incremental_controls.sql` adds the batch constraints, supporting
+indexes and the latest-successful-watermark view.
 
-Member 1 stops after producing reliable Bronze data and processable Silver CDC
-events. Customer standardisation and identity matching are downstream work.
+`02_seed_source_data.sql` loads the supplied sample data into the simulated
+operational source tables. The writes are idempotent, so rerunning the file does
+not create duplicate source records.
+
+`03_load_initial_bronze.sql` loads the three B1 batches into Bronze and checks
+that their row counts match the batch control records. Once they pass, the
+initial batches are published to Silver as successful.
+
+`04_create_incremental_procedure.sql` creates the reusable CDC procedure. For
+each B2 batch, it:
+
+- stages the raw rows and CDC events in Bronze;
+- checks row counts, operation types, source IDs, payload references and event
+  sequences;
+- publishes valid CDC events to Silver;
+- advances the watermark only when validation succeeds;
+- records a blocking data-quality issue when the batch fails.
+
+`05_run_failure_retry_demo.sql` deliberately fails `B2-CRM` after its Bronze
+rows have been staged. It then retries the same batch successfully and runs it
+once more to show that the procedure is safe to rerun.
+
+`06_run_remaining_incremental_batches.sql` processes the Lending and AML/KYC
+batches. Lending succeeds. AML/KYC fails because the supplied `CDC-019` event
+has a blank `operation_type`. That bad value is kept as supplied instead of
+being silently changed.
+
+`07_validation_tests.sql` checks the batch states, row counts, watermarks,
+retained raw events and recorded quality issues.
 
 ## Source-to-Bronze mapping
 
-| Source | Source table | Bronze table | Business/change key |
+| Source | Source table | Bronze table | Record key |
 |---|---|---|---|
-| CRM | `source_systems.raw_crm_customer` | `bronze.raw_crm_customer` | source + customer reference + version |
-| CRM | `source_systems.raw_banking_account_snapshot` | `bronze.raw_banking_account_snapshot` | source + account reference + version |
-| CRM | `source_systems.raw_account_transaction` | `bronze.raw_account_transaction` | source + transaction reference |
-| Lending | `source_systems.raw_lending_customer` | `bronze.raw_lending_customer` | source + customer reference + version |
-| Lending | `source_systems.raw_loan_snapshot` | `bronze.raw_loan_snapshot` | source + loan reference + version |
-| AML/KYC | `source_systems.raw_aml_kyc_customer` | `bronze.raw_aml_kyc_customer` | source + customer reference + version |
-| AML/KYC | `source_systems.raw_kyc_verification` | `bronze.raw_kyc_verification` | source + KYC reference |
-| AML/KYC | `source_systems.raw_aml_screening` | `bronze.raw_aml_screening` | source + screening reference |
+| CRM | `source_systems.raw_crm_customer` | `bronze.raw_crm_customer` | customer reference + version |
+| CRM | `source_systems.raw_banking_account_snapshot` | `bronze.raw_banking_account_snapshot` | account reference + version |
+| CRM | `source_systems.raw_account_transaction` | `bronze.raw_account_transaction` | transaction reference |
+| Lending | `source_systems.raw_lending_customer` | `bronze.raw_lending_customer` | customer reference + version |
+| Lending | `source_systems.raw_loan_snapshot` | `bronze.raw_loan_snapshot` | loan reference + version |
+| AML/KYC | `source_systems.raw_aml_kyc_customer` | `bronze.raw_aml_kyc_customer` | customer reference + version |
+| AML/KYC | `source_systems.raw_kyc_verification` | `bronze.raw_kyc_verification` | KYC reference |
+| AML/KYC | `source_systems.raw_aml_screening` | `bronze.raw_aml_screening` | screening reference |
 
-The metadata tables `source_system`, `ingestion_batch` and
-`cdc_change_event` are also copied to Bronze. Their validated, authoritative
-versions are published in the Silver schema.
+The source-system, batch and CDC control tables are also copied into Bronze.
+Validated control records are then published to Silver for downstream modules.
 
-## Expected demonstration
+## Expected demo result
 
-- Initial B1 batches succeed: CRM 34 rows, Lending 12 rows and AML/KYC 27 rows.
-- `B2-CRM` is deliberately failed once, leaving its watermark unchanged, then
-  retried successfully without duplicate Bronze rows.
-- `B2-LEND` succeeds normally.
-- `B2-AMLKYC` fails validation because supplied event `CDC-019` has a blank
-  `operation_type`. The invalid raw event remains in Bronze and a blocking data
-  quality issue is retained. This is intentional evidence of error handling;
-  do not silently convert the blank value to `I`.
+The three initial batches should succeed:
 
-After the demo, CRM and Lending advance from watermark `2026-09-01` to
-`2026-09-15`. AML/KYC remains at `2026-09-01` because its incremental batch
-failed.
+- `B1-CRM`: 34 records
+- `B1-LEND`: 12 records
+- `B1-AMLKYC`: 27 records
 
-## Rerun behaviour
+After the incremental demo:
 
-Source and Bronze inserts use primary-key conflict handling. A batch already
-marked `SUCCEEDED` is skipped, while a `FAILED` batch may be retried. Watermarks
-are read only from successful batches and are never advanced by a failure.
+- `B2-CRM` succeeds after the forced failure and retry;
+- `B2-LEND` succeeds normally;
+- `B2-AMLKYC` remains failed because of `CDC-019`;
+- CRM and Lending watermarks move to `2026-09-15`;
+- the AML/KYC watermark stays at `2026-09-01`.
+
+## Rerunning the demo
+
+Bronze inserts use conflict handling, so existing raw rows are not duplicated.
+A batch already marked `SUCCEEDED` is skipped. A failed batch can be retried,
+and its watermark remains unchanged until that retry succeeds.
+
+This folder stops at reliable Bronze data and validated Silver control records.
+Customer matching and golden-record processing are handled by the downstream
+modules.

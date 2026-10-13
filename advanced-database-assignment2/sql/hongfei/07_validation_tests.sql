@@ -1,11 +1,11 @@
--- PostgreSQL 15+
--- Member 1 acceptance tests. Run after scripts 01-06 in filename order.
+-- Validates the Member 1 pipeline after scripts 01-06 have run.
 
 DO $member1_tests$
 DECLARE
   v_count integer;
   v_text text;
 BEGIN
+  -- Verifies all initial batches and their retained Bronze record counts.
   SELECT count(*)::integer
   INTO v_count
   FROM silver.ingestion_batch
@@ -41,6 +41,7 @@ BEGIN
     RAISE EXCEPTION 'B2-AMLKYC Bronze count is not 1';
   END IF;
 
+  -- Verifies the expected success or failure state of each incremental batch.
   SELECT load_status
   INTO v_text
   FROM silver.ingestion_batch
@@ -68,6 +69,7 @@ BEGIN
     RAISE EXCEPTION 'B2-AMLKYC should be FAILED, found %', v_text;
   END IF;
 
+  -- Verifies that only successful batches advanced their source watermark.
   SELECT watermark_end
   INTO v_text
   FROM silver.vw_latest_successful_watermark
@@ -95,6 +97,7 @@ BEGIN
     RAISE EXCEPTION 'AMLKYC watermark should remain 2026-09-01, found %', v_text;
   END IF;
 
+  -- Verifies raw CDC retention and publication of valid events only.
   SELECT count(*)::integer
   INTO v_count
   FROM bronze.cdc_change_event;
@@ -111,6 +114,7 @@ BEGIN
     RAISE EXCEPTION 'Expected 18 valid Silver CDC events, found %', v_count;
   END IF;
 
+  -- Verifies retained delete/error evidence and failure resolution after retry.
   IF NOT EXISTS (
     SELECT 1
     FROM bronze.raw_crm_customer
@@ -153,7 +157,7 @@ BEGIN
 END
 $member1_tests$;
 
--- Report-ready batch and watermark evidence.
+-- Displays batch, watermark, CDC and load-quality evidence.
 SELECT
   batch_id,
   source_system_id,
@@ -195,4 +199,3 @@ SELECT
 FROM silver.data_quality_issue
 WHERE issue_type = 'LOAD_VALIDATION'
 ORDER BY batch_id, detected_at;
-

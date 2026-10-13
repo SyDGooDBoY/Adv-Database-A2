@@ -1,11 +1,9 @@
--- PostgreSQL 15+
--- Member 1: seed the simulated operational Source layer from the supplied CSV
--- dataset. Statements are idempotent and runnable directly in CloudBeaver.
--- Blank CDC-019.operation_type is deliberately preserved for the failure test.
+-- Seeds the simulated Source layer with idempotent writes.
+-- The invalid CDC-019 operation is preserved to exercise the failure path.
 
 BEGIN;
 
--- source_system.csv: 3 rows
+-- Loads source-system definitions.
 INSERT INTO source_systems.source_system (
   source_system_id,
   system_name,
@@ -25,7 +23,7 @@ ON CONFLICT (source_system_id) DO UPDATE SET
   system_owner = EXCLUDED.system_owner,
   active_flag = EXCLUDED.active_flag;
 
--- ingestion_batch.csv: 6 rows
+-- Loads ingestion-batch definitions.
 INSERT INTO source_systems.ingestion_batch (
   batch_id,
   source_system_id,
@@ -56,7 +54,7 @@ ON CONFLICT (batch_id) DO UPDATE SET
   watermark_start = EXCLUDED.watermark_start,
   watermark_end = EXCLUDED.watermark_end;
 
--- cdc_change_event.csv: 19 rows
+-- Loads simulated CDC events.
 INSERT INTO source_systems.cdc_change_event (
   change_event_id,
   source_system_id,
@@ -102,7 +100,7 @@ ON CONFLICT (change_event_id) DO UPDATE SET
   captured_at = EXCLUDED.captured_at,
   change_payload = EXCLUDED.change_payload;
 
--- raw_crm_customer.csv: 13 rows
+-- Loads raw CRM customers.
 INSERT INTO source_systems.raw_crm_customer (
   bronze_record_reference,
   source_system_id,
@@ -135,7 +133,7 @@ VALUES
   ('BR-CRM-013', 'CRM', 'B2-CRM', 'CRM-011', 1, 'I', 'Mia Rivera', '1993-05-20', 'mia.rivera@example.test', '0412001011', '22 Church Street, Ryde NSW 2112', 'ACTIVE', '2026-09-15T07:20:00', '2026-09-15T08:12:00')
 ON CONFLICT (bronze_record_reference) DO NOTHING;
 
--- raw_lending_customer.csv: 6 rows
+-- Loads raw lending customers.
 INSERT INTO source_systems.raw_lending_customer (
   bronze_record_reference,
   source_system_id,
@@ -161,7 +159,7 @@ VALUES
   ('BR-LEND-C-006', 'LEND', 'B1-LEND', 'LEND-012', 1, 'I', 'Leo Martin', '1968-10-07', 'leo.martin@example.test', '0412001012', '16 Bay Street, Rockdale NSW 2216', 'ACTIVE', '2026-09-01T07:35:00', '2026-09-01T08:12:00')
 ON CONFLICT (bronze_record_reference) DO NOTHING;
 
--- raw_aml_kyc_customer.csv: 9 rows
+-- Loads raw AML/KYC customers.
 INSERT INTO source_systems.raw_aml_kyc_customer (
   bronze_record_reference,
   source_system_id,
@@ -190,7 +188,7 @@ VALUES
   ('BR-AML-C-009', 'AMLKYC', 'B1-AMLKYC', 'KYC-014', 1, 'I', 'Lucas Park', '1991-04-19', 'lucas.park@example.test', '0412001014', '7 North Street, Burwood NSW 2134', 'ACTIVE', '2026-09-01T07:40:00', '2026-09-01T08:14:00')
 ON CONFLICT (bronze_record_reference) DO NOTHING;
 
--- raw_banking_account_snapshot.csv: 17 rows
+-- Loads raw banking-account snapshots.
 INSERT INTO source_systems.raw_banking_account_snapshot (
   bronze_record_reference,
   source_system_id,
@@ -232,7 +230,7 @@ VALUES
   ('BR-ACC-017', 'CRM', 'B2-CRM', 'ACC-011', 'CRM-011', 1, 'I', 'SAVINGS', 'OPEN', 'AUD', 5200.00, '2026-09-15', NULL, '2026-09-15', 14.00, 5.00, 0.00, '2026-09-15T07:46:00', '2026-09-15T08:17:00')
 ON CONFLICT (bronze_record_reference) DO NOTHING;
 
--- raw_loan_snapshot.csv: 12 rows
+-- Loads raw loan snapshots.
 INSERT INTO source_systems.raw_loan_snapshot (
   bronze_record_reference,
   source_system_id,
@@ -270,7 +268,7 @@ VALUES
   ('BR-LOAN-012', 'LEND', 'B2-LEND', 'LOAN-012', 'LEND-012', 2, 'U', 'PERSONAL', 'ACTIVE', 65000.00, 53300.00, 0.065000, '2023-01-15', '2033-01-15', '2026-09-15', 63.00, 21.00, 53300.00, '2026-09-15T07:48:00', '2026-09-15T08:19:00')
 ON CONFLICT (bronze_record_reference) DO NOTHING;
 
--- raw_account_transaction.csv: 16 rows
+-- Loads raw account transactions.
 INSERT INTO source_systems.raw_account_transaction (
   bronze_record_reference,
   source_system_id,
@@ -302,7 +300,7 @@ VALUES
   ('BR-TXN-016', 'CRM', 'B1-CRM', 'TXN-013-2', 'ACC-013', '2026-09-01T06:30:00', 'DEBIT', 108.00, 'POSTED', '2026-09-01T08:20:00')
 ON CONFLICT (bronze_record_reference) DO NOTHING;
 
--- raw_kyc_verification.csv: 9 rows
+-- Loads raw KYC verification events.
 INSERT INTO source_systems.raw_kyc_verification (
   bronze_record_reference,
   source_system_id,
@@ -329,7 +327,7 @@ VALUES
   ('BR-KYC-009', 'AMLKYC', 'B1-AMLKYC', 'VFY-014', 'KYC-014', 'IDENTITY_DOCUMENT', 'VERIFIED', '2026-09-01T07:00:00', '2028-09-01', 'LOW', NULL, '2026-09-01T08:22:00')
 ON CONFLICT (bronze_record_reference) DO NOTHING;
 
--- raw_aml_screening.csv: 10 rows
+-- Loads raw AML screening events.
 INSERT INTO source_systems.raw_aml_screening (
   bronze_record_reference,
   source_system_id,
