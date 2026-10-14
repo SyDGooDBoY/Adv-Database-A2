@@ -32,11 +32,17 @@ comments = sum(1 for line in lines07 if line.lstrip().startswith("--"))
 print(f"  total {len(lines07)}   comments {comments}   code {len(lines07) - comments}")
 
 print("\n=== Dangling function calls (called but never defined) ===")
+# A function call is written as schema.name( with no space before the bracket. A
+# table reference always has a space after the name (an alias, or nothing), so
+# requiring the bracket immediately after the name separates the two cases.
 defined = set(re.findall(r"CREATE OR REPLACE (?:FUNCTION|PROCEDURE) (?:silver|gold)\.(\w+)", all_text))
-called = set(re.findall(r"(?<!FROM )(?<!INTO )(?<!JOIN )(?<!TABLE )(?:silver|gold)\.(\w+)\s*\(", all_text))
+called = set(re.findall(r"(?:silver|gold)\.(\w+)\(", all_text))
 dangling = sorted(called - defined)
 print(f"  defined={len(defined)}  called={len(called)}")
-print(f"  dangling: {dangling if dangling else 'none'}")
+if dangling:
+    print(f"  dangling: {dangling}")
+else:
+    print("  dangling: none - every call resolves to a definition")
 
 print("\n=== Objects defined but never referenced twice (possible dead code) ===")
 for name in sorted(defined):
