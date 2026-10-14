@@ -1,9 +1,6 @@
 -- PostgreSQL 15+
--- Member 5: enforce the KYC/AML case-state and status rules from the report's
---
--- business rules. Added in a guard so the module can be rerun safely.
--- Every violation is raised as an exception rather than silently skipped. The
--- seed data in 01_seed_kyc_aml_bronze.sql is aligned with these rules, so a
+-- Member 5：给案件与事实表加 CHECK 约束，并建配套索引。
+-- 约束用守卫方式添加，可重复执行；违反约束会直接报错而不是被静默忽略。
 
 DO $compliance_rules$
 DECLARE
@@ -157,7 +154,7 @@ BEGIN
 END
 $compliance_rules$;
 
--- Supporting indexes for the validation and case-reuse lookups.
+-- 校验与案件复用所需的支撑索引。
 CREATE INDEX IF NOT EXISTS ix_kyc_verification_record_customer
   ON silver.kyc_verification_record (customer_id, verification_date DESC);
 

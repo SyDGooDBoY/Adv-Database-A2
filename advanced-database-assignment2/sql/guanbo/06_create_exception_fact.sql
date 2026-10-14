@@ -1,16 +1,11 @@
 -- PostgreSQL 15+
--- Member 5: the KYC/AML Exception Report's accumulating snapshot fact.
---
--- gold.fact_compliance_exception holds exactly one row per originating case:
---   * exactly one of verification_case_id and aml_case_id is populated, and it
---     must agree with exception_source_type;
+-- Member 5：合规异常累积快照事实表。一个来源案件一行，未结案件刷新时更新原行。
+-- 规则：两个案件编号必有且仅有一个，并与来源类型一致；每个案件只出现一次；
+-- 身份未确认时 customer_key 为空，报表用左连接保留；账龄算到结案日或报告基准日。
 
--- The shared setup created fact_compliance_exception_index_14 and _15 as plain
--- unique indexes on verification_case_id and aml_case_id. PostgreSQL treats null
--- values as distinct in a unique index, but the fact stores exactly one case
--- reference per row, so every row leaves the other column null and only the
--- first row of each type could be inserted. Replacing them with partial unique
--- indexes keeps the "each case occurs once" rule while allowing the nulls.
+-- 修正共享建表的两个唯一索引：每行只填一个案件编号、另一列为 NULL，而 PostgreSQL
+-- 唯一索引把 NULL 视为互不相同，会导致每类案件只能插入一行。
+-- 改为排除 NULL 的部分唯一索引，既允许 NULL 又保证每个案件只出现一次。
 DO $fact_indexes$
 BEGIN
   IF EXISTS (
@@ -223,8 +218,7 @@ BEGIN
     days_open = EXCLUDED.days_open,
     last_updated_at = EXCLUDED.last_updated_at;
 
-  -- A fact row whose originating case no longer exists would break the rule that
-  -- each case appears exactly once, so it is removed when it goes stale.
+  -- 来源案件已不存在的陈旧事实行会破坏"每个案件只出现一次"，予以清理。
   DELETE FROM gold.fact_compliance_exception fact
   WHERE NOT EXISTS (
     SELECT 1

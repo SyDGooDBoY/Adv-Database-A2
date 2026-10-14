@@ -1,9 +1,14 @@
 -- PostgreSQL 15+
--- Member 5 acceptance tests. Run after scripts 00-07 in filename order, then:
+-- Member 5 验收测试：断言业务结果，并输出可直接截图的报表查询。
+-- 先按文件名顺序执行 00-07，再依次调用：
 --
 --   CALL silver.process_kyc_aml_batch('B1-AMLKYC', DATE '2026-09-30');
 --   CALL silver.process_kyc_aml_batch('B2-AMLKYC', DATE '2026-09-30');
 --   CALL silver.publish_compliance_cases();
+--   CALL silver.progress_compliance_cases(DATE '2026-09-30');
+--   CALL gold.refresh_compliance_exception_fact(DATE '2026-09-30');
+--
+-- 基准日取 2026-09-30，晚于两个批次，因此 VFY-012（有效期 2026-08-15）正确判为过期。
 
 DO $member5_tests$
 DECLARE
@@ -23,8 +28,7 @@ DECLARE
   v_cases_before integer;
   v_cases_after integer;
 BEGIN
-  -- 1. Both batches published their events, including the batch that Member 1
-  --    leaves FAILED because of the blank CDC operation_type.
+  -- 1. 两个批次的事件都已发布，包括 Member 1 因 CDC 事件 operation_type 为空而置为 FAILED 的那批。
   SELECT count(*)::integer INTO v_kyc_published
   FROM silver.kyc_verification_record
   WHERE source_system_id = 'AMLKYC';
@@ -54,7 +58,7 @@ BEGIN
       v_b2_aml_published;
   END IF;
 
-  -- 2. Every event still carries a subject reference.
+  -- 2. 每条事件都仍然有主体引用。
   SELECT count(*)::integer INTO v_count
   FROM silver.kyc_verification_record
   WHERE customer_id IS NULL AND source_customer_record_id IS NULL;
@@ -71,7 +75,7 @@ BEGIN
     RAISE EXCEPTION 'Blocking AML subject rule did not withhold % records', v_count;
   END IF;
 
-  -- 3. No blocking finding may be registered for a published event.
+  -- 3. 已发布的事件不应登记任何阻断级问题。
   SELECT count(*)::integer INTO v_count
   FROM silver.data_quality_issue
   WHERE validation_run_id LIKE 'KYC-AML-M5-%'
@@ -81,7 +85,7 @@ BEGIN
     RAISE EXCEPTION 'Found % blocking issues on published events', v_count;
   END IF;
 
-  -- 4. The reportable findings the supplied data must produce.
+  -- 4. 演示数据应当产生的可报告发现。
   SELECT count(*)::integer INTO v_count
   FROM silver.data_quality_issue
   WHERE validation_run_id LIKE 'KYC-AML-M5-%'
@@ -109,7 +113,7 @@ BEGIN
     RAISE EXCEPTION 'Expected 1 AML screening alert finding (SCR-005-2), found %', v_count;
   END IF;
 
-  -- 5. Case types are limited to the values the report requires.
+  -- 5. 案件类型只能是报告规定的取值。
   SELECT count(*)::integer INTO v_count
   FROM silver.special_verification_case
   WHERE case_type IN ('KYC_GAP', 'IDENTITY_MISMATCH', 'STATUS_DISCREPANCY');
@@ -126,9 +130,8 @@ BEGIN
   SELECT count(*)::integer INTO v_verification_cases FROM silver.special_verification_case;
   SELECT count(*)::integer INTO v_aml_cases FROM silver.aml_case;
 
-  -- Only the KYC gap and status discrepancy rules map to a case type. The LOW
-  -- unresolved-identity notice on other events stays a quality record, because
-  -- an identity that is still pending is not itself a compliance exception.
+  -- 只有资料缺口与状态矛盾两类规则会建案；LOW 级的"身份尚未合并"只是提示，
+  -- 仍然只登记为质量问题。
   IF v_verification_cases <> 2 THEN
     RAISE EXCEPTION 'Expected 2 verification cases, found %', v_verification_cases;
   END IF;
@@ -137,9 +140,7 @@ BEGIN
     RAISE EXCEPTION 'Expected 1 AML case, found %', v_aml_cases;
   END IF;
 
-  -- 6. Every open finding whose rule maps to a case type is represented by a
-  --    case. A rule without a mapping (the LOW unresolved-identity notice) is
-  --    intentionally left as a quality record only.
+  -- 6. 凡映射到案件类型的未结发现，都必须有对应案件。
   SELECT count(*)::integer INTO v_pending_links
   FROM silver.data_quality_issue issue
   WHERE issue.validation_run_id LIKE 'KYC-AML-M5-%'
@@ -167,7 +168,7 @@ BEGIN
       v_count;
   END IF;
 
-  -- The case must represent the event the finding is about, not another one.
+  -- 案件必须指向该发现所属的事件，不能指向别的事件。
   SELECT count(*)::integer INTO v_count
   FROM silver.data_quality_issue issue
   JOIN silver.special_verification_case investigation
@@ -184,7 +185,7 @@ BEGIN
       v_count;
   END IF;
 
-  -- 7. Case status and closing timestamp agree.
+  -- 7. 案件状态与结案时间一致。
   SELECT count(*)::integer INTO v_count
   FROM silver.special_verification_case
   WHERE (case_status IN ('RESOLVED', 'CLOSED') AND resolved_at IS NULL)
@@ -203,7 +204,7 @@ BEGIN
     RAISE EXCEPTION '% AML cases have an inconsistent status and closing date', v_count;
   END IF;
 
-  -- 8. The accumulating fact holds exactly one row per originating case.
+  -- 8. 累积事实表每个来源案件只有一行。
   SELECT count(*)::integer INTO v_fact_rows FROM gold.fact_compliance_exception;
 
   IF v_fact_rows <> v_verification_cases + v_aml_cases THEN
@@ -232,7 +233,7 @@ BEGIN
     RAISE EXCEPTION '% originating cases appear more than once in the fact', v_duplicate_cases;
   END IF;
 
-  -- 9. Exactly one case reference per fact row, agreeing with its source type.
+  -- 9. 每行事实恰好一个案件引用，且与来源类型一致。
   SELECT count(*)::integer INTO v_orphan_rows
   FROM gold.fact_compliance_exception
   WHERE (verification_case_id IS NULL AND aml_case_id IS NULL)
@@ -251,9 +252,7 @@ BEGIN
     RAISE EXCEPTION '% exception fact rows disagree with exception_source_type', v_count;
   END IF;
 
-  -- 10. days_open is consistent with the dates it is derived from.
-  -- days_open counts to the closing date, or to the as-of date while open, and
-  -- never beyond the reporting date.
+  -- 10. 账龄与所依据的日期一致，且不超过报告基准日。
   SELECT count(*)::integer INTO v_count
   FROM gold.fact_compliance_exception
   WHERE days_open <> GREATEST(
@@ -283,7 +282,7 @@ BEGIN
       v_count;
   END IF;
 
-  -- 11. The unresolved identity is reported, not hidden.
+  -- 11. 身份未确认的异常要出现在报表里，不能被丢掉。
   SELECT count(*)::integer INTO v_count
   FROM gold.fact_compliance_exception
   WHERE customer_key IS NULL;
@@ -303,7 +302,7 @@ BEGIN
     RAISE EXCEPTION 'The exception report dropped % rows with an unresolved identity', v_count;
   END IF;
 
-  -- 12. Warning-level rules that must not fire on the supplied data.
+  -- 12. 以下规则在演示数据上不应触发。
   SELECT count(*)::integer INTO v_count
   FROM silver.data_quality_issue
   WHERE validation_run_id LIKE 'KYC-AML-M5-%'
@@ -323,8 +322,7 @@ BEGIN
     RAISE EXCEPTION 'Supplied data unexpectedly raised % inconsistent-data findings', v_count;
   END IF;
 
-  -- 13. KYC status follows the report rule, so a customer with an open
-  --     exception is never reported as VERIFIED.
+  -- 13. KYC 状态符合报告规则：有未结异常的客户不能是 VERIFIED。
   SELECT count(*)::integer INTO v_count
   FROM silver.customer_kyc_status(v_reference_date)
   WHERE kyc_status = 'VERIFIED'
@@ -342,7 +340,7 @@ BEGIN
     RAISE EXCEPTION '% customers have a KYC status outside the report values', v_count;
   END IF;
 
-  -- 14. Reruns must not duplicate anything. Both steps below are idempotent.
+  -- 14. 重复执行不产生重复数据。
   SELECT count(*)::integer INTO v_cases_before FROM silver.special_verification_case;
 
   CALL silver.publish_compliance_cases();
@@ -379,7 +377,7 @@ BEGIN
     RAISE EXCEPTION 'Reprocessing duplicated KYC events; found %', v_count;
   END IF;
 
-  -- 15. Refreshing an open case updates its row instead of adding another.
+  -- 15. 刷新未结案件时更新原行而不是新增行。
   CALL gold.refresh_compliance_exception_fact(v_reference_date);
 
   SELECT count(*)::integer INTO v_count FROM gold.fact_compliance_exception;
@@ -395,9 +393,9 @@ BEGIN
 END
 $member5_tests$;
 
--- Report-ready evidence.
+-- 报表输出：以下查询的结果可直接用于报告与截图。
 
--- KYC/AML Exception Report.
+-- KYC/AML 异常报表。
 SELECT
   exception_source_type,
   exception_type,
@@ -413,12 +411,12 @@ SELECT
 FROM gold.vw_kyc_aml_exception_report
 ORDER BY exception_source_type, exception_type, opened_date;
 
--- Exception summary.
+-- 异常汇总。
 SELECT *
 FROM gold.vw_compliance_exception_summary
 ORDER BY open_exception_count DESC, longest_days_open DESC;
 
--- KYC status per customer under the report rule.
+-- 按报告规则求出的客户 KYC 状态。
 SELECT
   customer_id,
   customer_full_name,
@@ -430,7 +428,7 @@ SELECT
 FROM silver.customer_kyc_status(DATE '2026-09-30')
 ORDER BY kyc_status, customer_id;
 
--- Validation findings, including the rules that legitimately did not fire.
+-- 校验发现（含按设计未触发的规则）。
 SELECT
   rule_name,
   entity_name,
@@ -442,7 +440,7 @@ WHERE validation_run_id LIKE 'KYC-AML-M5-%'
 GROUP BY rule_name, entity_name, severity
 ORDER BY rule_name;
 
--- Cases and their clearing evidence.
+-- 案件及其清除证据。
 SELECT
   investigation.verification_case_id AS case_id,
   'VERIFICATION' AS case_source,
@@ -466,7 +464,7 @@ SELECT
 FROM silver.aml_case investigation
 ORDER BY case_source, case_type, case_id;
 
--- Traceability from the retained raw record to the reported exception.
+-- 从保留的原始记录到所报异常的追溯链路。
 SELECT
   bronze_record_reference,
   batch_id,
