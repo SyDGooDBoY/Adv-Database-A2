@@ -4,21 +4,6 @@
 -- 【为什么要在这里塞种子数据】
 --   数据来自仓库里的合成 CSV。为了让模块在 CloudBeaver 里能直接跑起来，不依赖
 --   "PostgreSQL 服务器能读到本地 Windows 路径"，所以把 CSV 内容写成 INSERT。
---
--- 【两条重要约束】
---   1. Bronze 只增不删、归 Member 1 所有，所以每次插入前先判断"这个批次在不在"，
---      在就跳过。重复执行不会产生重复行，也不会覆盖已有原始数据。
---   2. 批次控制信息要同时写进 source_systems（模拟业务库）和 silver（控制层），
---      两处字段相同、数据同源，所以用一段循环把同一份数据喂给两边。
---
--- 【数据构成】
---   B1-AMLKYC：9 条 KYC 验证 + 9 条 AML 筛查 + 9 条客户资料
---   B2-AMLKYC：1 条 AML 筛查（监控名单疑似命中，演示里的 AML 异常就来自它）
---
--- 【关于 B2-AMLKYC】
---   Member 1 会把 B2-AMLKYC 故意置为 FAILED（源数据里有个 CDC 事件的
---   operation_type 是空的），但它的原始行仍在 Bronze 里，本模块照样处理，
---   这样那条合规异常才不会丢。
 
 -- 批次控制信息：一处定义，两处使用
 CREATE OR REPLACE PROCEDURE silver.seed_kyc_aml_batches()
@@ -80,9 +65,7 @@ CALL silver.seed_kyc_aml_batches();
 
 DROP PROCEDURE silver.seed_kyc_aml_batches();
 
--- ============================================================================
 -- KYC 验证原始数据：data/synthetic/raw_kyc_verification.csv（B1-AMLKYC，9 条）
--- ============================================================================
 DO $seed_kyc_verification$
 BEGIN
   IF EXISTS (SELECT 1 FROM bronze.raw_kyc_verification WHERE batch_id = 'B1-AMLKYC') THEN
@@ -111,9 +94,7 @@ BEGIN
 END
 $seed_kyc_verification$;
 
--- ============================================================================
 -- AML 筛查原始数据：data/synthetic/raw_aml_screening.csv（B1 九条 + B2 一条）
--- ============================================================================
 DO $seed_aml_screening$
 BEGIN
   IF EXISTS (SELECT 1 FROM bronze.raw_aml_screening WHERE batch_id = 'B1-AMLKYC') THEN

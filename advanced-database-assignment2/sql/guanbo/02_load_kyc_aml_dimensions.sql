@@ -4,19 +4,6 @@
 -- silver.customer_master and silver.source_customer_record belong to Member 2's
 -- identity resolution. This module must respect their foreign keys, so the
 -- KYC/AML events it publishes can only be linked once some identity exists for
--- each source customer reference they mention.
---
--- The loader is deliberately conservative:
---   * an existing customer or source record is never modified;
---   * a source reference that already maps to a customer reuses that mapping;
---   * only references with no mapping at all receive a placeholder customer,
---     which Member 2's matching process can reconcile later.
---
--- The KYC/AML source customer reference in the supplied data uses the form
--- KYC-nnn, while the CRM and Lending sources use CRM-nnn and LEND-nnn. The
--- prototypes therefore remain separate source records for the same person until
--- Member 2 matches them, which is exactly the unresolved-identity state this
--- module's cases are designed to report.
 
 CREATE OR REPLACE PROCEDURE silver.load_kyc_aml_customer_identity()
 LANGUAGE plpgsql

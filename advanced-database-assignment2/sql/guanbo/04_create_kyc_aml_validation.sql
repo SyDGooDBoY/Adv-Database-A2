@@ -1,25 +1,9 @@
 -- PostgreSQL 15+
 -- Member 5：KYC/AML 校验规则，以及把发现登记为数据质量问题。
 --
--- 【文件结构】
---   第 1 节  标识生成：由业务编号算出稳定的主键（可重复执行的关键）
---   第 2 节  身份解析：把一条事件对应到"来源客户记录 / 金客户"（两个检测函数共用）
---   第 3 节  KYC 验证规则（8 条）
---   第 4 节  AML 筛查规则（10 条）
---   第 5 节  规则 → 案件类型映射（报告口径的单一来源）
---   第 6 节  问题登记
---
--- 【设计要点】
---   * 每条记录只返回**一条**发现：同一记录可能同时踩中多条规则，但报表只需要最严重的
---     那条。排序口径统一写在两个函数末尾的 ranked 里，两处完全一致。
---   * 规则**不负责建案件**。是否建案由第 5 节的映射决定，建案动作在
---     05_create_case_processing.sql，这样规则文件不依赖下一个文件。
---   * 批次参数传 NULL 表示"检查全部批次，每条事件取 Bronze 里最新的一版"，
---     用于判断历史问题是否已被修正（旧问题才能被正确关闭）。
-
--- ============================================================================
--- 第 1 节  标识生成
--- ============================================================================
+-- 结构：标识生成 / 身份解析 / KYC 规则 8 条 / AML 规则 10 条 / 规则到案件类型映射 / 问题登记。
+-- 设计：每条记录只保留最严重的一条发现（两个函数共用末尾同一套排序）；规则不负责建案件，
+--       建案在 05_create_case_processing.sql；批次参数传 NULL 表示检查全部批次并取最新版本。
 
 -- 用"来源系统 + 来源编号"算出主键。固定算法带来两个好处：
 --   1. 重复处理同一批数据得到同一个编号，天然幂等，不会重复插入；
@@ -52,9 +36,7 @@ COMMENT ON FUNCTION silver.kyc_verification_id(varchar, varchar) IS
 COMMENT ON FUNCTION silver.aml_screening_id(varchar, varchar) IS
   '由"来源系统 + 来源筛查编号"生成稳定的筛查事件主键，作用同 KYC 版本。';
 
--- ============================================================================
 -- 第 2 节  身份解析（两个检测函数共用）
--- ============================================================================
 
 -- 一条事件要能回答"当事人是谁"。本函数返回两个编号：
 --   source_customer_record_id：来源系统里那条客户记录，在 Silver 中对应哪条记录
@@ -124,9 +106,7 @@ $resolve_identity$;
 COMMENT ON FUNCTION silver.resolve_event_identity(varchar, varchar, varchar, varchar) IS
   '解析一条事件对应的来源客户记录与金客户编号；查不到返回 NULL，表示身份尚未合并。';
 
--- ============================================================================
 -- 第 3 节  KYC 验证规则（8 条）
--- ============================================================================
 
 DROP FUNCTION IF EXISTS silver.detect_kyc_verification_issues(varchar, date);
 
@@ -218,113 +198,99 @@ AS $detect_kyc$
       evaluated.verification_status IN ('PENDING', 'MISSING_DOCUMENT', 'FAILED') AS is_gap
     FROM evaluated
   ),
+  -- 每个规则块只写本规则特有的内容：e.* 展开 evaluated_rules 的公共列（来源编号、身份等），
+  -- 其后是规则名、问题类型、严重程度，末项为去重用的规则优先级。
   -- 8 条规则各自的命中结果，统一成一张发现清单
   findings AS (
     SELECT
-      evaluated_rules.bronze_record_reference, evaluated_rules.source_kyc_reference,
-      evaluated_rules.batch_id, evaluated_rules.source_customer_reference,
-      evaluated_rules.customer_id, evaluated_rules.source_customer_record_id,
+      e.*,
       'subject_reference' AS issue_attribute_name,
       'KYC_EVENT_SUBJECT_REQUIRED' AS rule_name,
       'KYC_SUBJECT_MISSING' AS issue_type,
       '这条验证事件既没有金客户也没有来源客户记录，缺少主体引用。' AS issue_description,
       'BLOCKING' AS issue_severity, NULL::varchar AS rule_case_type, 1 AS rule_priority
-    FROM evaluated_rules
-    WHERE evaluated_rules.customer_id IS NULL
-      AND evaluated_rules.source_customer_record_id IS NULL
+    FROM evaluated_rules e
+    WHERE e.customer_id IS NULL
+      AND e.source_customer_record_id IS NULL
 
     UNION ALL
     SELECT
-      evaluated_rules.bronze_record_reference, evaluated_rules.source_kyc_reference,
-      evaluated_rules.batch_id, evaluated_rules.source_customer_reference,
-      evaluated_rules.customer_id, evaluated_rules.source_customer_record_id,
+      e.*,
       'subject_reference', 'KYC_IDENTITY_LINK_MISMATCH', 'KYC_IDENTITY_MISMATCH',
       '这条事件关联的金客户与来源客户记录，并不是同一个已确认的身份。',
       'HIGH', 'IDENTITY_MISMATCH', 2
-    FROM evaluated_rules
-    WHERE evaluated_rules.customer_id IS NOT NULL
-      AND evaluated_rules.source_customer_record_id IS NOT NULL
+    FROM evaluated_rules e
+    WHERE e.customer_id IS NOT NULL
+      AND e.source_customer_record_id IS NOT NULL
       AND NOT EXISTS (
         SELECT 1 FROM silver.customer_source_match accepted_match
-        WHERE accepted_match.source_customer_record_id = evaluated_rules.source_customer_record_id
-          AND accepted_match.customer_id = evaluated_rules.customer_id
+        WHERE accepted_match.source_customer_record_id = e.source_customer_record_id
+          AND accepted_match.customer_id = e.customer_id
           AND accepted_match.match_status = 'ACCEPTED'
           AND accepted_match.is_current_match
       )
 
     UNION ALL
     SELECT
-      evaluated_rules.bronze_record_reference, evaluated_rules.source_kyc_reference,
-      evaluated_rules.batch_id, evaluated_rules.source_customer_reference,
-      evaluated_rules.customer_id, evaluated_rules.source_customer_record_id,
+      e.*,
       'verification_type', 'KYC_VERIFICATION_TYPE_INVALID', 'KYC_VERIFICATION_TYPE_INVALID',
-      concat('验证类型 ', COALESCE(evaluated_rules.verification_type, 'NULL'), ' 不是可识别的 KYC 验证类型。'),
+      concat('验证类型 ', COALESCE(e.verification_type, 'NULL'), ' 不是可识别的 KYC 验证类型。'),
       'MEDIUM', NULL::varchar, 3
-    FROM evaluated_rules
-    WHERE NOT evaluated_rules.type_is_known
+    FROM evaluated_rules e
+    WHERE NOT e.type_is_known
 
     UNION ALL
     SELECT
-      evaluated_rules.bronze_record_reference, evaluated_rules.source_kyc_reference,
-      evaluated_rules.batch_id, evaluated_rules.source_customer_reference,
-      evaluated_rules.customer_id, evaluated_rules.source_customer_record_id,
+      e.*,
       'verification_status', 'KYC_VERIFICATION_STATUS_INVALID', 'KYC_VERIFICATION_STATUS_INVALID',
-      concat('验证状态 ', COALESCE(evaluated_rules.verification_status, 'NULL'), ' 不是可识别的 KYC 验证状态。'),
+      concat('验证状态 ', COALESCE(e.verification_status, 'NULL'), ' 不是可识别的 KYC 验证状态。'),
       'MEDIUM', NULL::varchar, 3
-    FROM evaluated_rules
-    WHERE NOT evaluated_rules.status_is_known
+    FROM evaluated_rules e
+    WHERE NOT e.status_is_known
 
     UNION ALL
     SELECT
-      evaluated_rules.bronze_record_reference, evaluated_rules.source_kyc_reference,
-      evaluated_rules.batch_id, evaluated_rules.source_customer_reference,
-      evaluated_rules.customer_id, evaluated_rules.source_customer_record_id,
+      e.*,
       'expiry_date', 'KYC_VERIFICATION_EXPIRED', 'KYC_VERIFICATION_EXPIRED',
       concat(
-        '到基准日已失效：状态 ', evaluated_rules.verification_status,
-        '，有效期 ', COALESCE(evaluated_rules.expiry_date::text, 'NULL'), '。'
+        '到基准日已失效：状态 ', e.verification_status,
+        '，有效期 ', COALESCE(e.expiry_date::text, 'NULL'), '。'
       ),
       'HIGH', 'STATUS_DISCREPANCY', 2
-    FROM evaluated_rules
-    WHERE evaluated_rules.is_expired
+    FROM evaluated_rules e
+    WHERE e.is_expired
 
     UNION ALL
     SELECT
-      evaluated_rules.bronze_record_reference, evaluated_rules.source_kyc_reference,
-      evaluated_rules.batch_id, evaluated_rules.source_customer_reference,
-      evaluated_rules.customer_id, evaluated_rules.source_customer_record_id,
+      e.*,
       'verification_status', 'KYC_VERIFICATION_STATUS_DISCREPANCY', 'KYC_VERIFICATION_STATUS_DISCREPANCY',
       concat(
         '状态为已验证，但按记录的有效期已不能依赖：有效期 ',
-        COALESCE(evaluated_rules.expiry_date::text, '空'),
-        '，验证时间 ', evaluated_rules.verification_date::date::text, '。'
+        COALESCE(e.expiry_date::text, '空'),
+        '，验证时间 ', e.verification_date::date::text, '。'
       ),
       'HIGH', 'STATUS_DISCREPANCY', 2
-    FROM evaluated_rules
-    WHERE evaluated_rules.is_discrepancy
+    FROM evaluated_rules e
+    WHERE e.is_discrepancy
 
     UNION ALL
     SELECT
-      evaluated_rules.bronze_record_reference, evaluated_rules.source_kyc_reference,
-      evaluated_rules.batch_id, evaluated_rules.source_customer_reference,
-      evaluated_rules.customer_id, evaluated_rules.source_customer_record_id,
+      e.*,
       'verification_status', 'KYC_VERIFICATION_INCOMPLETE', 'KYC_VERIFICATION_GAP',
-      concat('验证没有完成：状态 ', evaluated_rules.verification_status, '。'),
+      concat('验证没有完成：状态 ', e.verification_status, '。'),
       'MEDIUM', 'KYC_GAP', 3
-    FROM evaluated_rules
-    WHERE evaluated_rules.is_gap
+    FROM evaluated_rules e
+    WHERE e.is_gap
 
     UNION ALL
     SELECT
-      evaluated_rules.bronze_record_reference, evaluated_rules.source_kyc_reference,
-      evaluated_rules.batch_id, evaluated_rules.source_customer_reference,
-      evaluated_rules.customer_id, evaluated_rules.source_customer_record_id,
+      e.*,
       'customer_id', 'KYC_VERIFICATION_UNRESOLVED_IDENTITY', 'KYC_IDENTITY_UNRESOLVED',
       '这条验证事件挂在来源客户记录上，但金客户尚未确认；报表仍应包含它。',
       'LOW', NULL::varchar, 4
-    FROM evaluated_rules
-    WHERE evaluated_rules.customer_id IS NULL
-      AND evaluated_rules.source_customer_record_id IS NOT NULL
+    FROM evaluated_rules e
+    WHERE e.customer_id IS NULL
+      AND e.source_customer_record_id IS NOT NULL
   ),
   -- 每条记录只留最严重的一条（两个检测函数使用同一套排序口径）
   ranked AS (
@@ -360,9 +326,7 @@ $detect_kyc$;
 COMMENT ON FUNCTION silver.detect_kyc_verification_issues(varchar, date) IS
   '对一个批次的 KYC 验证事件套用 8 条规则，每条记录只返回最严重的一条发现。批次传 NULL 表示检查全部批次并取最新版本。';
 
--- ============================================================================
 -- 第 4 节  AML 筛查规则（10 条）
--- ============================================================================
 
 DROP FUNCTION IF EXISTS silver.detect_aml_screening_issues(varchar, date);
 
@@ -446,148 +410,126 @@ AS $detect_aml$
   ),
   findings AS (
     SELECT
-      evaluated_rules.bronze_record_reference, evaluated_rules.source_screening_reference,
-      evaluated_rules.batch_id, evaluated_rules.source_customer_reference,
-      evaluated_rules.customer_id, evaluated_rules.source_customer_record_id,
+      e.*,
       'subject_reference' AS issue_attribute_name,
       'AML_EVENT_SUBJECT_REQUIRED' AS rule_name,
       'AML_SUBJECT_MISSING' AS issue_type,
       '这条筛查事件既没有金客户也没有来源客户记录，缺少主体引用。' AS issue_description,
       'BLOCKING' AS issue_severity, NULL::varchar AS rule_case_type, 1 AS rule_priority
-    FROM evaluated_rules
-    WHERE evaluated_rules.customer_id IS NULL
-      AND evaluated_rules.source_customer_record_id IS NULL
+    FROM evaluated_rules e
+    WHERE e.customer_id IS NULL
+      AND e.source_customer_record_id IS NULL
 
     UNION ALL
     SELECT
-      evaluated_rules.bronze_record_reference, evaluated_rules.source_screening_reference,
-      evaluated_rules.batch_id, evaluated_rules.source_customer_reference,
-      evaluated_rules.customer_id, evaluated_rules.source_customer_record_id,
+      e.*,
       'subject_reference', 'AML_IDENTITY_LINK_MISMATCH', 'AML_IDENTITY_MISMATCH',
       '这条筛查事件关联的金客户与来源客户记录，并不是同一个已确认的身份。',
       'HIGH', 'IDENTITY_MISMATCH', 2
-    FROM evaluated_rules
-    WHERE evaluated_rules.customer_id IS NOT NULL
-      AND evaluated_rules.source_customer_record_id IS NOT NULL
+    FROM evaluated_rules e
+    WHERE e.customer_id IS NOT NULL
+      AND e.source_customer_record_id IS NOT NULL
       AND NOT EXISTS (
         SELECT 1 FROM silver.customer_source_match accepted_match
-        WHERE accepted_match.source_customer_record_id = evaluated_rules.source_customer_record_id
-          AND accepted_match.customer_id = evaluated_rules.customer_id
+        WHERE accepted_match.source_customer_record_id = e.source_customer_record_id
+          AND accepted_match.customer_id = e.customer_id
           AND accepted_match.match_status = 'ACCEPTED'
           AND accepted_match.is_current_match
       )
 
     UNION ALL
     SELECT
-      evaluated_rules.bronze_record_reference, evaluated_rules.source_screening_reference,
-      evaluated_rules.batch_id, evaluated_rules.source_customer_reference,
-      evaluated_rules.customer_id, evaluated_rules.source_customer_record_id,
+      e.*,
       'screening_type', 'AML_SCREENING_TYPE_INVALID', 'AML_SCREENING_TYPE_INVALID',
-      concat('名单类别 ', COALESCE(evaluated_rules.screening_type, 'NULL'), ' 不是可识别的筛查类型。'),
+      concat('名单类别 ', COALESCE(e.screening_type, 'NULL'), ' 不是可识别的筛查类型。'),
       'MEDIUM', NULL::varchar, 3
-    FROM evaluated_rules
-    WHERE NOT evaluated_rules.type_is_known
+    FROM evaluated_rules e
+    WHERE NOT e.type_is_known
 
     UNION ALL
     SELECT
-      evaluated_rules.bronze_record_reference, evaluated_rules.source_screening_reference,
-      evaluated_rules.batch_id, evaluated_rules.source_customer_reference,
-      evaluated_rules.customer_id, evaluated_rules.source_customer_record_id,
+      e.*,
       'screening_result', 'AML_SCREENING_RESULT_INVALID', 'AML_SCREENING_RESULT_INVALID',
-      concat('筛查结论 ', COALESCE(evaluated_rules.screening_result, 'NULL'), ' 不是可识别的筛查结论。'),
+      concat('筛查结论 ', COALESCE(e.screening_result, 'NULL'), ' 不是可识别的筛查结论。'),
       'MEDIUM', NULL::varchar, 3
-    FROM evaluated_rules
-    WHERE NOT evaluated_rules.result_is_known
+    FROM evaluated_rules e
+    WHERE NOT e.result_is_known
 
     UNION ALL
     SELECT
-      evaluated_rules.bronze_record_reference, evaluated_rules.source_screening_reference,
-      evaluated_rules.batch_id, evaluated_rules.source_customer_reference,
-      evaluated_rules.customer_id, evaluated_rules.source_customer_record_id,
+      e.*,
       'match_score', 'AML_REVIEW_FLAG_INCONSISTENT', 'AML_REVIEW_FLAG_MISSING',
       concat(
-        '筛查结论 ', evaluated_rules.screening_result,
+        '筛查结论 ', e.screening_result,
         ' 属于警报，但 review_required_flag 为假；疑似命中必须复核。'
       ),
       'HIGH', 'STATUS_DISCREPANCY', 2
-    FROM evaluated_rules
-    WHERE evaluated_rules.is_review_flag_missing
+    FROM evaluated_rules e
+    WHERE e.is_review_flag_missing
 
     UNION ALL
     SELECT
-      evaluated_rules.bronze_record_reference, evaluated_rules.source_screening_reference,
-      evaluated_rules.batch_id, evaluated_rules.source_customer_reference,
-      evaluated_rules.customer_id, evaluated_rules.source_customer_record_id,
+      e.*,
       'screening_result', 'AML_REVIEW_REQUIRED', 'AML_SCREENING_ALERT',
       concat(
-        '筛查结论为 ', evaluated_rules.screening_result,
-        '，相似度 ', COALESCE(evaluated_rules.match_score::text, 'NULL'),
+        '筛查结论为 ', e.screening_result,
+        '，相似度 ', COALESCE(e.match_score::text, 'NULL'),
         '；这是需要调查的警报，本身不等于已确认的问题。'
       ),
       'MEDIUM', NULL::varchar, 2
-    FROM evaluated_rules
-    WHERE evaluated_rules.result_is_alert
+    FROM evaluated_rules e
+    WHERE e.result_is_alert
 
     UNION ALL
     SELECT
-      evaluated_rules.bronze_record_reference, evaluated_rules.source_screening_reference,
-      evaluated_rules.batch_id, evaluated_rules.source_customer_reference,
-      evaluated_rules.customer_id, evaluated_rules.source_customer_record_id,
+      e.*,
       'review_required_flag', 'AML_CLEAR_SCREENING_WITH_REVIEW', 'AML_STATUS_DISCREPANCY',
       concat(
         '结论为未命中却要求复核，且相似度未达警报级：',
-        COALESCE(evaluated_rules.match_score::text, 'NULL'), '。'
+        COALESCE(e.match_score::text, 'NULL'), '。'
       ),
       'MEDIUM', 'STATUS_DISCREPANCY', 3
-    FROM evaluated_rules
-    WHERE evaluated_rules.is_clear_with_review
+    FROM evaluated_rules e
+    WHERE e.is_clear_with_review
 
     UNION ALL
     SELECT
-      evaluated_rules.bronze_record_reference, evaluated_rules.source_screening_reference,
-      evaluated_rules.batch_id, evaluated_rules.source_customer_reference,
-      evaluated_rules.customer_id, evaluated_rules.source_customer_record_id,
+      e.*,
       'match_score', 'AML_CLEAR_SCREENING_SCORE_INCONSISTENT', 'AML_STATUS_DISCREPANCY',
-      concat('结论为未命中，却带着警报级相似度 ', evaluated_rules.match_score::text, '。'),
+      concat('结论为未命中，却带着警报级相似度 ', e.match_score::text, '。'),
       'MEDIUM', 'STATUS_DISCREPANCY', 3
-    FROM evaluated_rules
-    WHERE evaluated_rules.is_clear_with_alert_score
+    FROM evaluated_rules e
+    WHERE e.is_clear_with_alert_score
 
     UNION ALL
     SELECT
-      evaluated_rules.bronze_record_reference, evaluated_rules.source_screening_reference,
-      evaluated_rules.batch_id, evaluated_rules.source_customer_reference,
-      evaluated_rules.customer_id, evaluated_rules.source_customer_record_id,
+      e.*,
       'match_score', 'AML_MATCH_SCORE_OUT_OF_RANGE', 'AML_MATCH_SCORE_INVALID',
-      concat('相似度 ', evaluated_rules.match_score::text, ' 超出有效范围 0.0000 到 1.0000。'),
+      concat('相似度 ', e.match_score::text, ' 超出有效范围 0.0000 到 1.0000。'),
       'MEDIUM', NULL::varchar, 3
-    FROM evaluated_rules
-    WHERE evaluated_rules.match_score IS NOT NULL
-      AND (evaluated_rules.match_score < 0 OR evaluated_rules.match_score > 1)
+    FROM evaluated_rules e
+    WHERE e.match_score IS NOT NULL
+      AND (e.match_score < 0 OR e.match_score > 1)
 
     UNION ALL
     SELECT
-      evaluated_rules.bronze_record_reference, evaluated_rules.source_screening_reference,
-      evaluated_rules.batch_id, evaluated_rules.source_customer_reference,
-      evaluated_rules.customer_id, evaluated_rules.source_customer_record_id,
+      e.*,
       'match_score', 'AML_MATCH_SCORE_MISSING', 'AML_MATCH_SCORE_MISSING',
       '返回了警报却没有相似度分数，无法判断命中强度。',
       'MEDIUM', NULL::varchar, 3
-    FROM evaluated_rules
-    WHERE evaluated_rules.result_is_alert
-      AND evaluated_rules.match_score IS NULL
+    FROM evaluated_rules e
+    WHERE e.result_is_alert
+      AND e.match_score IS NULL
 
     UNION ALL
     SELECT
-      evaluated_rules.bronze_record_reference, evaluated_rules.source_screening_reference,
-      evaluated_rules.batch_id, evaluated_rules.source_customer_reference,
-      evaluated_rules.customer_id, evaluated_rules.source_customer_record_id,
+      e.*,
       'customer_id', 'AML_SCREENING_UNRESOLVED_IDENTITY', 'AML_IDENTITY_UNRESOLVED',
       '这条筛查事件挂在来源客户记录上，但金客户尚未确认；报表仍应包含它。',
       'LOW', NULL::varchar, 4
-    FROM evaluated_rules
-    WHERE evaluated_rules.customer_id IS NULL
-      AND evaluated_rules.source_customer_record_id IS NOT NULL
+    FROM evaluated_rules e
+    WHERE e.customer_id IS NULL
+      AND e.source_customer_record_id IS NOT NULL
   ),
   ranked AS (
     SELECT
@@ -622,9 +564,7 @@ $detect_aml$;
 COMMENT ON FUNCTION silver.detect_aml_screening_issues(varchar, date) IS
   '对一个批次的 AML 筛查事件套用 10 条规则，每条记录只返回最严重的一条发现。批次传 NULL 表示检查全部批次并取最新版本。';
 
--- ============================================================================
 -- 第 5 节  规则 → 案件类型映射（报告口径的单一来源）
--- ============================================================================
 
 CREATE SEQUENCE IF NOT EXISTS silver.compliance_case_seed;
 
@@ -656,9 +596,7 @@ $rule_case_type$;
 COMMENT ON FUNCTION silver.compliance_rule_case_type(varchar) IS
   '规则到案件类型的唯一映射。返回 NULL 表示该规则只登记质量问题、不建案件。';
 
--- ============================================================================
 -- 第 6 节  问题登记
--- ============================================================================
 
 -- 把一条发现登记成 Silver 的数据质量问题。
 --
