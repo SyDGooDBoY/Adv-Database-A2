@@ -12,11 +12,11 @@ from docx.oxml.ns import qn
 
 from pathlib import Path
 
-# Resolve the output path from this script's location so the document lands in the
-# module directory regardless of the working directory.
+# Write the document next to this script, not into the module directory: the
+# generated .docx is not part of the repository.
 MODULE_DIR = Path(__file__).resolve().parents[2] / "advanced-database-assignment2" / "sql" / "guanbo"
-OUT = MODULE_DIR / "REPORT_SECTION_MEMBER5.docx"
-
+OUT = Path(__file__).resolve().parent / "out" / "REPORT_SECTION_MEMBER5.docx"
+OUT.parent.mkdir(parents=True, exist_ok=True)
 doc = Document()
 
 # Base style: Times New Roman 12pt is the usual report default.
@@ -369,7 +369,7 @@ para(
 doc.add_heading("4. Implementation Approach", level=2)
 
 para(
-    "The module is implemented as ten SQL scripts executed in filename order, followed "
+    "The module is implemented as nine SQL scripts executed in filename order, followed "
     "by a pipeline of five procedure calls per batch. It comprises five tables, three "
     "views, thirteen functions, eight procedures, twenty check constraints and six "
     "indexes."
@@ -388,7 +388,6 @@ table(
         ["06_create_exception_fact", "The accumulating exception fact and its refresh"],
         ["07_create_compliance_reporting_views", "Exception report, summary, lineage and KYC status"],
         ["08_validation_tests", "Fifteen acceptance assertions and report-ready queries"],
-        ["09_add_chinese_comments", "Chinese descriptions for every object the module owns"],
     ],
     widths=[6.6, 8.8],
 )

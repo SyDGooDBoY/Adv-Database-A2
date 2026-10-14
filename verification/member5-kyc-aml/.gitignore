@@ -1,3 +1,6 @@
-﻿# Verification harness for the Member 5 module. The harness itself is kept so the
+# Verification harness for the Member 5 module. The harness itself is kept so the
 # checks can be reproduced; the installed dependencies are not.
 node_modules/
+
+# Generated report documents are not part of the repository.
+out/

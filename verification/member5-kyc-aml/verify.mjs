@@ -5,7 +5,7 @@
 // validation tests. The static parser check in validate_syntax.py cannot see
 // inside a plpgsql body; this can.
 
-import { readFileSync, readdirSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { PGlite } from "@electric-sql/pglite";
@@ -61,7 +61,7 @@ if (failed > 0) {
 
 console.log("\n2. Member 5 module scripts (run order)");
 const moduleFiles = readdirSync(moduleDir)
-  .filter((name) => /^\d\d_.*\.sql$/.test(name))
+  .filter((name) => /^0[0-8]_.*\.sql$/.test(name))
   .sort();
 
 let deferredAssertions = null;
@@ -133,103 +133,111 @@ if (deferredAssertions === null) {
 // resolved through regclass and routines through pg_proc, because
 // obj_description does not accept a function signature.
 console.log("\n4b. Chinese comments on owned objects");
-try {
-  const missingRelations = await db.query(`
-    WITH owned(kind, relation_name) AS (
-      VALUES
-        ('table', 'silver.kyc_verification_record'),
-        ('table', 'silver.special_verification_case'),
-        ('table', 'silver.aml_screening_result'),
-        ('table', 'silver.aml_case'),
-        ('table', 'gold.fact_compliance_exception'),
-        ('view', 'gold.vw_kyc_aml_exception_report'),
-        ('view', 'gold.vw_compliance_exception_summary'),
-        ('view', 'silver.vw_kyc_aml_exception_lineage')
-    )
-    SELECT owned.kind, owned.relation_name
-    FROM owned
-    WHERE obj_description(owned.relation_name::regclass) IS NULL;`);
-
-  const missingRoutines = await db.query(`
-    WITH owned(kind, schema_name, routine_name) AS (
-      VALUES
-        ('function', 'silver', 'kyc_verification_id'),
-        ('function', 'silver', 'aml_screening_id'),
-        ('function', 'gold', 'compliance_exception_fact_id'),
-        ('function', 'silver', 'detect_kyc_verification_issues'),
-        ('function', 'silver', 'detect_aml_screening_issues'),
-        ('function', 'silver', 'compliance_rule_case_type'),
-        ('function', 'silver', 'register_compliance_finding'),
-        ('function', 'silver', 'find_or_open_case'),
-        ('function', 'silver', 'find_or_open_verification_case'),
-        ('function', 'silver', 'find_or_open_aml_case'),
-        ('function', 'silver', 'resolve_compliance_case'),
-        ('function', 'silver', 'resolve_event_identity'),
-        ('function', 'silver', 'customer_kyc_status'),
-        ('procedure', 'silver', 'stage_bronze_batch'),
-        ('procedure', 'silver', 'record_event_lineage'),
-        ('procedure', 'silver', 'load_kyc_aml_customer_identity'),
-        ('procedure', 'silver', 'publish_kyc_verification_batch'),
-        ('procedure', 'silver', 'publish_aml_screening_batch'),
-        ('procedure', 'silver', 'process_kyc_aml_batch'),
-        ('procedure', 'silver', 'publish_compliance_cases'),
-        ('procedure', 'silver', 'progress_compliance_cases'),
-        ('procedure', 'gold', 'refresh_compliance_exception_fact')
-    )
-    SELECT owned.kind, owned.schema_name || '.' || owned.routine_name AS routine
-    FROM owned
-    WHERE NOT EXISTS (
-      SELECT 1
-      FROM pg_proc routine
-      JOIN pg_namespace routine_schema ON routine_schema.oid = routine.pronamespace
-      WHERE routine_schema.nspname = owned.schema_name
-        AND routine.proname = owned.routine_name
-        AND obj_description(routine.oid, 'pg_proc') IS NOT NULL
-    );`);
-
-  const missingColumns = await db.query(`
-    SELECT c.table_schema || '.' || c.table_name || '.' || c.column_name AS target
-    FROM information_schema.columns c
-    WHERE (c.table_schema, c.table_name) IN (
-      ('silver', 'kyc_verification_record'),
-      ('silver', 'special_verification_case'),
-      ('silver', 'aml_screening_result'),
-      ('silver', 'aml_case'),
-      ('gold', 'fact_compliance_exception')
-    )
-      AND col_description(
-        (quote_ident(c.table_schema) || '.' || quote_ident(c.table_name))::regclass,
-        c.ordinal_position
-      ) IS NULL;`);
-
-  const columnTotal = await db.query(`
-    SELECT count(*)::int AS n FROM information_schema.columns
-    WHERE (table_schema, table_name) IN (
-      ('silver', 'kyc_verification_record'),
-      ('silver', 'special_verification_case'),
-      ('silver', 'aml_screening_result'),
-      ('silver', 'aml_case'),
-      ('gold', 'fact_compliance_exception')
-    );`);
-
-  const problems = [
-    ...missingRelations.rows.map((r) => `${r.kind} ${r.relation_name}`),
-    ...missingRoutines.rows.map((r) => `${r.kind} ${r.routine}`),
-    ...missingColumns.rows.map((r) => `column ${r.target}`),
-  ];
-
-  if (problems.length === 0) {
-    console.log(
-      `  ok   5 tables, 3 views, 21 routines and ${columnTotal.rows[0].n} columns all carry a comment`,
-    );
-  } else {
+// The Chinese comment script was removed from the module on request, so this check
+// runs only when that script is present. Without it a freshly built database carries
+// no comments at all, and failing the run for that would be noise rather than signal.
+if (!existsSync(join(moduleDir, "09_add_chinese_comments.sql"))) {
+  console.log("\n4b. Chinese comments on owned objects");
+  console.log("  skipped: 09_add_chinese_comments.sql is not in the module directory");
+} else {
+  try {
+    const missingRelations = await db.query(`
+      WITH owned(kind, relation_name) AS (
+        VALUES
+          ('table', 'silver.kyc_verification_record'),
+          ('table', 'silver.special_verification_case'),
+          ('table', 'silver.aml_screening_result'),
+          ('table', 'silver.aml_case'),
+          ('table', 'gold.fact_compliance_exception'),
+          ('view', 'gold.vw_kyc_aml_exception_report'),
+          ('view', 'gold.vw_compliance_exception_summary'),
+          ('view', 'silver.vw_kyc_aml_exception_lineage')
+      )
+      SELECT owned.kind, owned.relation_name
+      FROM owned
+      WHERE obj_description(owned.relation_name::regclass) IS NULL;`);
+  
+    const missingRoutines = await db.query(`
+      WITH owned(kind, schema_name, routine_name) AS (
+        VALUES
+          ('function', 'silver', 'kyc_verification_id'),
+          ('function', 'silver', 'aml_screening_id'),
+          ('function', 'gold', 'compliance_exception_fact_id'),
+          ('function', 'silver', 'detect_kyc_verification_issues'),
+          ('function', 'silver', 'detect_aml_screening_issues'),
+          ('function', 'silver', 'compliance_rule_case_type'),
+          ('function', 'silver', 'register_compliance_finding'),
+          ('function', 'silver', 'find_or_open_case'),
+          ('function', 'silver', 'find_or_open_verification_case'),
+          ('function', 'silver', 'find_or_open_aml_case'),
+          ('function', 'silver', 'resolve_compliance_case'),
+          ('function', 'silver', 'resolve_event_identity'),
+          ('function', 'silver', 'customer_kyc_status'),
+          ('procedure', 'silver', 'stage_bronze_batch'),
+          ('procedure', 'silver', 'record_event_lineage'),
+          ('procedure', 'silver', 'load_kyc_aml_customer_identity'),
+          ('procedure', 'silver', 'publish_kyc_verification_batch'),
+          ('procedure', 'silver', 'publish_aml_screening_batch'),
+          ('procedure', 'silver', 'process_kyc_aml_batch'),
+          ('procedure', 'silver', 'publish_compliance_cases'),
+          ('procedure', 'silver', 'progress_compliance_cases'),
+          ('procedure', 'gold', 'refresh_compliance_exception_fact')
+      )
+      SELECT owned.kind, owned.schema_name || '.' || owned.routine_name AS routine
+      FROM owned
+      WHERE NOT EXISTS (
+        SELECT 1
+        FROM pg_proc routine
+        JOIN pg_namespace routine_schema ON routine_schema.oid = routine.pronamespace
+        WHERE routine_schema.nspname = owned.schema_name
+          AND routine.proname = owned.routine_name
+          AND obj_description(routine.oid, 'pg_proc') IS NOT NULL
+      );`);
+  
+    const missingColumns = await db.query(`
+      SELECT c.table_schema || '.' || c.table_name || '.' || c.column_name AS target
+      FROM information_schema.columns c
+      WHERE (c.table_schema, c.table_name) IN (
+        ('silver', 'kyc_verification_record'),
+        ('silver', 'special_verification_case'),
+        ('silver', 'aml_screening_result'),
+        ('silver', 'aml_case'),
+        ('gold', 'fact_compliance_exception')
+      )
+        AND col_description(
+          (quote_ident(c.table_schema) || '.' || quote_ident(c.table_name))::regclass,
+          c.ordinal_position
+        ) IS NULL;`);
+  
+    const columnTotal = await db.query(`
+      SELECT count(*)::int AS n FROM information_schema.columns
+      WHERE (table_schema, table_name) IN (
+        ('silver', 'kyc_verification_record'),
+        ('silver', 'special_verification_case'),
+        ('silver', 'aml_screening_result'),
+        ('silver', 'aml_case'),
+        ('gold', 'fact_compliance_exception')
+      );`);
+  
+    const problems = [
+      ...missingRelations.rows.map((r) => `${r.kind} ${r.relation_name}`),
+      ...missingRoutines.rows.map((r) => `${r.kind} ${r.routine}`),
+      ...missingColumns.rows.map((r) => `column ${r.target}`),
+    ];
+  
+    if (problems.length === 0) {
+      console.log(
+        `  ok   5 tables, 3 views, 21 routines and ${columnTotal.rows[0].n} columns all carry a comment`,
+      );
+    } else {
+      failed += 1;
+      console.log(`  FAIL ${problems.length} owned object(s) have no comment`);
+      for (const problem of problems) console.log(`       ${problem}`);
+    }
+  } catch (error) {
     failed += 1;
-    console.log(`  FAIL ${problems.length} owned object(s) have no comment`);
-    for (const problem of problems) console.log(`       ${problem}`);
+    console.log(`  FAIL ${error.message}`);
   }
-} catch (error) {
-  failed += 1;
-  console.log(`  FAIL ${error.message}`);
 }
 
 console.log("\n5. reported output");
