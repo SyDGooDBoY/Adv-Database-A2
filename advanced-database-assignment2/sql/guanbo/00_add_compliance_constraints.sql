@@ -1,10 +1,9 @@
 -- PostgreSQL 15+
 -- Member 5: enforce the KYC/AML case-state and status rules from the report's
--- business rules. Added in a guard so the module can be rerun safely.
 --
+-- business rules. Added in a guard so the module can be rerun safely.
 -- Every violation is raised as an exception rather than silently skipped. The
 -- seed data in 01_seed_kyc_aml_bronze.sql is aligned with these rules, so a
--- failure here means real non-conforming data was loaded.
 
 DO $compliance_rules$
 DECLARE

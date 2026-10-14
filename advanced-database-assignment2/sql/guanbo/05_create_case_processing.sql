@@ -4,14 +4,6 @@
 -- Two behaviours are required by the report:
 --   1. A reportable KYC gap, identity mismatch or status discrepancy creates a
 --      SPECIAL_VERIFICATION_CASE with case_type KYC_GAP, IDENTITY_MISMATCH or
---      STATUS_DISCREPANCY. A repeated finding for the same customer and issue
---      type reuses the existing open case instead of opening another.
---   2. Case status and its closing timestamp must agree, so a case is only
---      resolved when its finding is actually cleared.
---
--- The two case tables carry different keys, so the module opens them through two
--- functions. An AML screening alert is not a confirmed finding: its case is a
--- review of that alert, not confirmation that money laundering occurred.
 
 -- Returns the SPECIAL_VERIFICATION_CASE representing a reportable KYC finding,
 -- opening one when no case exists yet for that KYC event and case type.

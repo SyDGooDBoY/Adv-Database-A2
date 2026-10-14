@@ -4,11 +4,6 @@
 --   CALL silver.process_kyc_aml_batch('B1-AMLKYC', DATE '2026-09-30');
 --   CALL silver.process_kyc_aml_batch('B2-AMLKYC', DATE '2026-09-30');
 --   CALL silver.publish_compliance_cases();
---   CALL silver.progress_compliance_cases(DATE '2026-09-30');
---   CALL gold.refresh_compliance_exception_fact(DATE '2026-09-30');
---
--- The reference date 2026-09-30 is after both supplied batches, so the expired
--- verification VFY-012 (expiry 2026-08-15) is correctly past its validity.
 
 DO $member5_tests$
 DECLARE

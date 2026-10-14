@@ -4,15 +4,6 @@
 -- gold.fact_compliance_exception holds exactly one row per originating case:
 --   * exactly one of verification_case_id and aml_case_id is populated, and it
 --     must agree with exception_source_type;
---   * each source case appears once, enforced by the two unique indexes;
---   * customer_key stays null while the identity is unresolved, so the report
---     reaches those cases through a left join;
---   * days_open counts calendar days from opened_date to resolved_date, or to
---     as_of_date while the case is open;
---   * refreshing an open case updates the same row instead of adding another.
---
--- exception_status is derived from the case state rather than stored on the
--- case, because it is the fact's own view of that case.
 
 -- The shared setup created fact_compliance_exception_index_14 and _15 as plain
 -- unique indexes on verification_case_id and aml_case_id. PostgreSQL treats null
