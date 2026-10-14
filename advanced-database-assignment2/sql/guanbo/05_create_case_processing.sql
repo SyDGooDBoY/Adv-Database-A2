@@ -1,12 +1,10 @@
 -- PostgreSQL 15+
--- Member 5: case-status processing for verification and AML investigations.
---
--- Two behaviours are required by the report:
---   1. A reportable KYC gap, identity mismatch or status discrepancy creates a
---      SPECIAL_VERIFICATION_CASE with case_type KYC_GAP, IDENTITY_MISMATCH or
+-- Member 5：案件的建立与状态流转（验证案件与 AML 案件）。
+-- 两条规则：可报告的发现建立对应案件，同一问题重复发现时复用已有案件；
+-- 案件状态必须与结案时间一致，问题清除后才结案。
+-- AML 筛查警报只是疑似，所以它开的是复核案件而不是定性结论。
 
--- Returns the SPECIAL_VERIFICATION_CASE representing a reportable KYC finding,
--- opening one when no case exists yet for that KYC event and case type.
+-- 返回该 KYC 发现对应的验证案件；不存在则新建。
 -- 通用"查找或建立案件"步骤，两个专用函数共用。
 --
 -- 三段逻辑：按主体与案件类型找已有案件；找到就复用；找不到才生成编号并插入
@@ -201,9 +199,8 @@ $open_aml_case$;
 COMMENT ON FUNCTION silver.find_or_open_aml_case(varchar, varchar, varchar, text, varchar) IS
   '查找或建立 AML 调查案件并返回案件编号。复用逻辑与验证案件一致。';
 
--- Dispatches a registered finding to the correct case table. Returns the
--- verification case identifier for KYC findings and NULL for AML findings,
--- because silver.data_quality_issue only carries a verification_case_id link.
+-- 按发现所属的表分派到对应的建案函数。
+-- KYC 类返回验证案件编号；AML 类返回 NULL，因为数据质量问题表只有验证案件这一列外键。
 CREATE OR REPLACE FUNCTION silver.resolve_compliance_case(
   p_entity_name varchar,
   p_case_type varchar,
@@ -242,10 +239,7 @@ $resolve_case$;
 COMMENT ON FUNCTION silver.resolve_compliance_case(varchar, varchar, varchar, varchar, text, varchar) IS
   'Opens or reuses the case for one finding and returns the verification case link expected by silver.data_quality_issue.';
 
--- Opens or reuses a case for every open finding this module registered and links
--- the KYC findings to their verification case. Safe to rerun: the functions are
--- keyed on the event and case type, so a finding that already has its case
--- produces no further rows.
+-- 为所有未结发现建立或复用案件，并回填 KYC 类的案件编号。可重复执行。
 CREATE OR REPLACE PROCEDURE silver.publish_compliance_cases(
   p_batch_id varchar DEFAULT NULL
 )
@@ -255,9 +249,8 @@ DECLARE
   v_open_issues integer;
   v_linked_issues integer := 0;
 BEGIN
-  -- silver.data_quality_issue records the source reference of the event, while
-  -- the case functions address the published record by its primary key, so the
-  -- published identifier is resolved here.
+  -- 数据质量问题表存的是事件的来源编号，建案函数按主键定位已发布记录，
+  -- 所以这里先把主键解析出来。
   DROP TABLE IF EXISTS tmp_compliance_case_issue;
   CREATE TEMP TABLE tmp_compliance_case_issue ON COMMIT DROP AS
   SELECT
@@ -272,12 +265,8 @@ BEGIN
     issue.rule_name,
     issue.issue_description,
     issue.severity,
-    -- One mapping function keeps the report's rule-to-case-type requirement in a
-    -- single place: 04_create_kyc_aml_validation.sql owns it.
-    -- Only a rule that the report marks as reportable opens a case. A rule with
-    -- no mapping (for example the LOW unresolved-identity notice) stays a quality
-    -- record, because an identity that is still pending is not a compliance
-    -- exception.
+    -- 规则到案件类型的映射由 04_create_kyc_aml_validation.sql 统一提供；
+    -- 没有映射的规则只登记质量问题、不建案件。
     silver.compliance_rule_case_type(issue.rule_name) AS case_type
   FROM silver.data_quality_issue issue
   LEFT JOIN silver.kyc_verification_record verification
@@ -317,8 +306,7 @@ BEGIN
     )
     FROM tmp_compliance_case_issue case_issue
     WHERE issue.data_quality_issue_id = case_issue.data_quality_issue_id
-      -- A rule without a case mapping stays a quality record only, so no case is
-      -- opened or linked for it.
+      -- 没有案件映射的规则不建案、也不回填案件号。
       AND case_issue.case_type IS NOT NULL;
     GET DIAGNOSTICS v_linked_issues = ROW_COUNT;
   END IF;
@@ -331,12 +319,9 @@ $publish_cases$;
 COMMENT ON PROCEDURE silver.publish_compliance_cases(varchar) IS
   'Opens or reuses the compliance case for every open KYC/AML finding and links KYC findings to their verification case.';
 
--- Reconciles case status against the current evidence:
---   * an open finding that the current rules no longer produce is resolved;
---   * a verification case whose last open finding is resolved becomes RESOLVED;
---   * an AML case whose alert is no longer raised becomes CLOSED;
---   * a case that still has an open finding stays open, so an accumulating
---     exception keeps counting days instead of being closed and reopened.
+-- 按当前证据回填案件状态：规则已不再报告的发现置为已解决；
+-- 最后一个未结发现清除的验证案件置为 RESOLVED；警报不再成立的 AML 案件置为 CLOSED；
+-- 仍有未结发现的案件保持未结，使账龄能持续累积。
 CREATE OR REPLACE PROCEDURE silver.progress_compliance_cases(
   p_reference_date date DEFAULT current_date,
   p_batch_id varchar DEFAULT NULL

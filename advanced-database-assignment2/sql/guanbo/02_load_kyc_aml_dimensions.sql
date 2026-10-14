@@ -1,9 +1,7 @@
 -- PostgreSQL 15+
--- Member 5: minimal customer identity used by this module's own events.
---
--- silver.customer_master and silver.source_customer_record belong to Member 2's
--- identity resolution. This module must respect their foreign keys, so the
--- KYC/AML events it publishes can only be linked once some identity exists for
+-- Member 5：为客户身份表补建本模块事件所引用的最小身份。
+-- 客户主表与来源客户记录表归 Member 2 的身份解析；本模块只补齐尚不存在的身份，
+-- 不改动已解析好的结果，以满足外键要求。
 
 CREATE OR REPLACE PROCEDURE silver.load_kyc_aml_customer_identity()
 LANGUAGE plpgsql
@@ -46,7 +44,7 @@ BEGIN
   INTO v_reference_count
   FROM tmp_kyc_aml_reference;
 
-  -- Retained Silver version of each source customer identity.
+  -- 每个来源客户身份在 Silver 中保留的一条记录。
   DROP TABLE IF EXISTS tmp_kyc_aml_source_record;
   CREATE TEMP TABLE tmp_kyc_aml_source_record
   ON COMMIT DROP
@@ -132,7 +130,7 @@ BEGIN
 
   GET DIAGNOSTICS v_created_source_records = ROW_COUNT;
 
-  -- Golden customer for any source record that has no identity mapping yet.
+  -- 尚未建立身份映射的来源记录，补建对应的金客户。
   DROP TABLE IF EXISTS tmp_kyc_aml_customer;
   CREATE TEMP TABLE tmp_kyc_aml_customer
   ON COMMIT DROP
@@ -194,10 +192,8 @@ BEGIN
 
   GET DIAGNOSTICS v_created_customers = ROW_COUNT;
 
-  -- Retained matching decision linking the source record to that customer. The
-  -- decision is ACCEPTED because this module owns both sides of it: it created
-  -- the placeholder customer from that same source record. A cross-source match
-  -- remains Member 2's decision, and this module never creates one.
+  -- 来源客户记录与金客户之间的匹配关系，状态 ACCEPTED：两边都由本模块建立。
+  -- 跨来源的匹配归 Member 2 决定，本模块不创建。
   INSERT INTO silver.customer_source_match (
     match_id,
     source_customer_record_id,
