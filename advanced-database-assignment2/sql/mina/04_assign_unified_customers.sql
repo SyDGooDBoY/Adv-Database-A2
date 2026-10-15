@@ -13,8 +13,7 @@ WHERE m.source_customer_record_id = scr.source_customer_record_id
   AND m.is_current_match = TRUE
   AND scr.is_current_version = FALSE;
 
-
--- Rebuild current decisions for current source records.
+-- Rebuild current decisions for current source records
 UPDATE silver.customer_source_match m
 SET
     effective_to = CURRENT_TIMESTAMP,
@@ -26,12 +25,9 @@ WHERE m.is_current_match = TRUE
       WHERE i.source_customer_record_id = m.source_customer_record_id
   );
 
-
--- ------------------------------------------------------------
--- 1. Find records that need manual review.
--- Source priority is used only to choose which side is held back.
--- CRM = 1, AML/KYC = 2, Lending = 3.
--- ------------------------------------------------------------
+-- 1. Find records that need manual review
+-- Source priority is used only to choose which side is held back
+-- CRM = 1, AML/KYC = 2, Lending = 3
 DROP TABLE IF EXISTS tmp_member2_pending;
 
 CREATE TEMP TABLE tmp_member2_pending AS
@@ -70,15 +66,10 @@ SELECT
 FROM pending_candidates
 GROUP BY source_customer_record_id;
 
-
--- ------------------------------------------------------------
--- 2. Build a simple group for accepted records.
---
--- Each accepted pair links two source records.
--- For the supplied three-source prototype, all sources are directly
--- compared, so MIN(record_id) gives the same group key to matching rows.
--- Single-source customers simply keep their own record ID as the key.
--- ------------------------------------------------------------
+-- 2. Build a simple group for accepted records
+-- Each accepted pair links two source records
+-- For the supplied three-source prototype, all sources are directly compared, so MIN(record_id) gives the same group key to matching rows
+-- Single source customers simply keep their own record ID as the key
 DROP TABLE IF EXISTS tmp_member2_assignment;
 
 CREATE TEMP TABLE tmp_member2_assignment AS
@@ -93,7 +84,7 @@ WITH eligible_records AS (
 ),
 
 group_options AS (
-    -- Every record can use itself as a group key.
+    -- Every record can use itself as a group key
     SELECT
         source_customer_record_id AS record_id,
         source_customer_record_id AS group_key
@@ -101,7 +92,7 @@ group_options AS (
 
     UNION ALL
 
-    -- Accepted link: A can also use B as a group key.
+    -- Accepted link: A can also use B as a group key
     SELECT
         d.record_a_id,
         d.record_b_id
@@ -110,7 +101,7 @@ group_options AS (
 
     UNION ALL
 
-    -- Accepted link: B can also use A as a group key.
+    -- Accepted link: B can also use A as a group key
     SELECT
         d.record_b_id,
         d.record_a_id
@@ -129,7 +120,7 @@ customer_groups AS (
 SELECT
     e.source_customer_record_id,
 
-    -- Stable enterprise customer ID for the group.
+    -- Stable enterprise customer ID for the group
     'CUST-' ||
     UPPER(
         SUBSTRING(
@@ -142,14 +133,8 @@ FROM eligible_records e
 JOIN customer_groups g
   ON e.source_customer_record_id = g.record_id;
 
-
--- ------------------------------------------------------------
--- 3. Create customer_master shells.
---
--- Member 3 will later choose the authoritative name, DOB, email,
--- phone and address. ON CONFLICT prevents this script from replacing
--- Member 3's existing golden customer values.
--- ------------------------------------------------------------
+-- 3. Create customer_master shells
+-- Module 3 will  choose the authoritative name, DOB, email, phone and address. ON CONFLICT prevents this script from replacing Module 3's existing golden customer values
 INSERT INTO silver.customer_master (
     customer_id,
     customer_full_name,
@@ -187,10 +172,7 @@ FROM tmp_member2_assignment
 
 ON CONFLICT (customer_id) DO NOTHING;
 
-
--- ------------------------------------------------------------
--- 4. Collect the best matching evidence for each accepted record.
--- ------------------------------------------------------------
+-- 4. Collect the best matching evidence for each accepted record
 DROP TABLE IF EXISTS tmp_member2_evidence;
 
 CREATE TEMP TABLE tmp_member2_evidence AS
@@ -219,10 +201,7 @@ SELECT
 FROM evidence
 GROUP BY source_customer_record_id;
 
-
--- ------------------------------------------------------------
--- 5. Save accepted and pending-review decisions.
--- ------------------------------------------------------------
+-- 5. Save accepted and pending review decisions
 INSERT INTO silver.customer_source_match (
     match_id,
     source_customer_record_id,
@@ -238,7 +217,7 @@ INSERT INTO silver.customer_source_match (
     matched_at
 )
 
--- Accepted records.
+-- Accepted records
 SELECT
     'MATCH-' ||
     UPPER(
@@ -279,7 +258,7 @@ LEFT JOIN tmp_member2_evidence e
 
 UNION ALL
 
--- Records that need manual review.
+-- Records that need manual review
 SELECT
     'MATCH-' ||
     UPPER(
@@ -307,7 +286,7 @@ SELECT
 
 FROM tmp_member2_pending p
 
--- Rerunning the script updates the same decision instead of duplicating it.
+-- Rerunning the script updates the same decision instead of duplicating it
 ON CONFLICT (match_id) DO UPDATE
 SET
     customer_id = EXCLUDED.customer_id,
@@ -320,7 +299,6 @@ SET
     matched_at = CURRENT_TIMESTAMP;
 
 COMMIT;
-
 
 -- check
 SELECT

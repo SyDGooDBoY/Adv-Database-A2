@@ -34,7 +34,7 @@ SELECT
         ELSE 0.0000
     END::decimal(5,4) AS pair_confidence_score,
 
-    -- Save the rule so the decision can be explained later.
+    -- Save the rule so the decision can be explained later
     CASE
         WHEN dob_conflict AND name_match AND phone_match
             THEN 'DOB_CONFLICT_NAME_PHONE_MATCH'
@@ -51,8 +51,7 @@ SELECT
 
 FROM silver.v_member2_match_candidates c;
 
-
--- Show only decisions that need action.
+-- Show only decisions that need action
 SELECT
     source_a,
     source_ref_a,

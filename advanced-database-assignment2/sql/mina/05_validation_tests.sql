@@ -8,7 +8,6 @@ SELECT
     28 AS expected_rows
 FROM silver.source_customer_record;
 
-
 -- Test 2: Only current non-deleted source records are used for matching
 SELECT
     'Test 2 - current source records' AS test_name,
@@ -17,8 +16,7 @@ SELECT
 FROM silver.source_customer_record
 WHERE is_current_version = TRUE;
 
-
--- Test 3: Number of accepted enterprise customers.
+-- Test 3: Number of accepted enterprise customers
 SELECT
     'Test 3 - enterprise customers' AS test_name,
     COUNT(DISTINCT customer_id) AS actual_rows,
@@ -27,8 +25,7 @@ FROM silver.customer_source_match
 WHERE is_current_match = TRUE
   AND match_status = 'ACCEPTED';
 
-
--- Test 4: Alice should have three source records sharing one customer ID.
+-- Test 4: Alice should have three source records sharing one customer ID
 SELECT
     'Test 4 - Alice' AS test_name,
     COUNT(*) AS source_records,
@@ -46,7 +43,6 @@ WHERE m.is_current_match = TRUE
           AND scr.source_customer_reference = 'KYC-001')
   );
 
-
 -- Test 5: Daniel's Lending record should require manual review.
 SELECT
     'Test 5 - Daniel' AS test_name,
@@ -60,8 +56,7 @@ WHERE m.is_current_match = TRUE
   AND scr.source_system_id = 'LEND'
   AND scr.source_customer_reference = 'LEND-002';
 
-
--- Test 6: Ethan should use CRM version 2 after the email update.
+-- Test 6: Ethan should use CRM version 2 after the email update
 SELECT
     'Test 6 - Ethan current version' AS test_name,
     scr.source_system_id,
@@ -81,8 +76,7 @@ WHERE scr.is_current_version = TRUE
   )
 ORDER BY scr.source_system_id;
 
-
--- Test 7: Ava's deleted CRM record should not have a current match.
+-- Test 7: Ava's deleted CRM record should not have a current match
 SELECT
     'Test 7 - Ava deleted' AS test_name,
     COUNT(*) AS current_matches,
@@ -94,8 +88,7 @@ WHERE m.is_current_match = TRUE
   AND scr.source_system_id = 'CRM'
   AND scr.source_customer_reference = 'CRM-007';
 
-
--- Final output for demonstration.
+-- Final output
 SELECT
     scr.source_system_id,
     scr.source_customer_reference,
