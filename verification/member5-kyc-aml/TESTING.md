@@ -110,14 +110,64 @@ is exactly why the execution tests exist.
 
 ---
 
-## 4. What is still not covered
+## 4. Diagnosing a failure
+
+Both suites report what failed; these two print the state that explains why.
+
+```bash
+node diagnose-load-order.mjs    # the batch registry after every file loads
+node diagnose-batch-call.mjs    # one incremental batch, called in isolation
+```
+
+`diagnose-load-order.mjs` was what traced a failure of this module's own test
+suite: the harness had excluded Member 1's `*_run_*` files, so its B2 batches
+never ran, and the report being measured was therefore missing data. The tool
+prints `silver.ingestion_batch` after each file, so a step that silently does
+nothing is visible immediately.
+
+`diagnose-batch-call.mjs` answers the next question — is the procedure wrong, or
+is the way it was called wrong — by loading Member 1 alone and calling one batch
+directly.
+
+---
+
+## 5. What is still not covered
 
 | Gap | Why it matters | How to close it |
 |---|---|---|
 | Only one database engine version | PGlite tracks recent PostgreSQL; the marker uses PostgreSQL 15 | Run both suites once on the marker's PostgreSQL before submission |
-| Members' own tests are not compared against each other's expected values | Member 1's test asserts 34 Bronze customer rows; the integration run holds 13, because only part of its flow runs in this harness | Ask each member to run `integration.mjs` and confirm their own module still meets its own numbers |
+| One database cannot reproduce every member's numbers | The modules seed overlapping business data into shared Bronze and Silver tables. With all six loaded, Member 1's `count_bronze_batch_records('B1-CRM')` returns more rows than the 34 its own test asserts, purely from rows other modules added — passing Member 1's validation inside this harness is **not** evidence that Member 1 is correct | Run each member's own test against that member's own module in isolation, which this harness does not do; `diagnose-member1.mjs`-style isolation is the pattern |
+| Integration is a load-and-run check, not a semantic one | It proves every module still loads and that this module's numbers are unchanged. It cannot prove that Member 4's risk rating consumes this module's KYC status correctly, because that needs one agreed reporting date | Agree the reporting date across members, then compare Member 4's `kyc_status` input with this module's `customer_kyc_status(date)` output for the same customers |
 | Member 3's README notes it was developed against a corrected copy of Member 2 | A local fix in one module is invisible to the others | Whoever owns Member 2 should confirm the correction is in the committed version |
 | Concurrency and volume | Everything here is single-session and small | Out of scope for the prototype |
+
+### Two coordination items found by running this
+
+1. **The reporting date differs between modules.** This module reports at
+   **2026-09-30**; Member 4's run script loads and reports at **2026-09-15**.
+   Member 4's risk rules take this module's `kyc_status` as an input, so the two
+   dates have to be reconciled before that input means anything.
+2. **Member 4's run script called its steps in the wrong order** — see below.
+
+---
+
+## 6. A worked example of what this harness found
+
+Member 4's `07_run_reporting_date.sql` ran `gold.load_dim_customer()` in step 7.1
+and `silver.load_financials(DATE '2026-09-15')` in step 7.2. The loader's
+internals call `silver.customer_financials(2026-09-15)`, which raises
+
+```
+Silver accounts/loans are not all dated 2026-09-15; run silver.load_financials for that date
+```
+
+because the financial data is only loaded in the *next* step. The two steps are
+the wrong way round. The failure was recorded as a note rather than a failure of
+this module, because that script is not a dependency of this module.
+
+It stopped reproducing once Member 1's B2 batches actually ran, which is itself
+informative: it shows the script depends on data another module's run steps
+produce, so its order relative to those steps matters too.
 
 ## References
 
