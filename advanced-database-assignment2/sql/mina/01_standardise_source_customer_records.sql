@@ -32,7 +32,7 @@ JOIN silver.ingestion_batch b
 WHERE b.load_status = 'SUCCEEDED';
 
 
--- LEAD finds when the next version of the same source customer starts.
+-- LEAD finds when the next version of the same source customer starts
 WITH customer_versions AS (
     SELECT
         v.*,
@@ -66,7 +66,7 @@ INSERT INTO silver.source_customer_record (
 )
 
 SELECT
-    -- Stable ID for each source record version.
+    -- Stable ID for each source record version
     'SCR-' || source_system_id || '-' ||
     source_customer_reference || '-V' ||
     source_record_version::text,
@@ -84,8 +84,8 @@ SELECT
     source_last_updated_at,
     valid_from_time,
 
-    -- A delete is closed immediately.
-    -- Other old versions close when the next version starts.
+    -- A delete is closed immediately
+    -- Other old versions close when the next version starts
     CASE
         WHEN operation_type = 'D' THEN valid_from_time
         ELSE next_version_time
@@ -116,7 +116,7 @@ SELECT
 
 FROM customer_versions
 
--- If this source version already exists, update it instead of duplicating it.
+-- If this source version already exists, update it instead of duplicating it
 ON CONFLICT (source_customer_record_id) DO UPDATE
 SET
     batch_id                   = EXCLUDED.batch_id,
@@ -133,7 +133,6 @@ SET
     record_hash                = EXCLUDED.record_hash;
 
 COMMIT;
-
 
 -- check
 SELECT

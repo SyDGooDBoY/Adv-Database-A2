@@ -32,7 +32,7 @@ SELECT
     source_phone_number,
     source_address,
 
-    -- Standardise names.
+    -- Standardise names
     -- Example: "WONG, ALICE" becomes "ALICE WONG".
     NULLIF(
         UPPER(
@@ -52,13 +52,13 @@ SELECT
 
     source_date_of_birth AS norm_dob,
 
-    -- Same idea as LOWER(TRIM(email)) in the workbook.
+    -- LOWER(TRIM(email))
     NULLIF(
         LOWER(TRIM(COALESCE(source_email_address, ''))),
         ''
     ) AS norm_email,
 
-    -- Convert Australian 04xx and +61 4xx formats to the same digits.
+    -- Convert Australian 04xx and +61 4xx formats to the same digits
     NULLIF(
         CASE
             WHEN phone_digits ~ '^61[0-9]{9}$'
@@ -70,7 +70,7 @@ SELECT
         ''
     ) AS norm_phone,
 
-    -- Standardise address text.
+    -- Standardise address text
     NULLIF(
         REGEXP_REPLACE(
             UPPER(TRIM(COALESCE(source_address, ''))),
@@ -83,9 +83,8 @@ SELECT
 
 FROM cleaned;
 
-
--- Compare customers only across different source systems.
--- a.id < b.id prevents the same pair appearing twice.
+-- Compare customers only across different source systems
+-- a.id < b.id prevents the same pair appearing twice
 CREATE OR REPLACE VIEW silver.v_member2_match_candidates AS
 SELECT
     a.source_customer_record_id AS record_a_id,
@@ -132,7 +131,6 @@ WHERE
     OR (a.norm_email IS NOT NULL AND a.norm_email = b.norm_email)
     OR (a.norm_phone IS NOT NULL AND a.norm_phone = b.norm_phone)
     OR (a.norm_address IS NOT NULL AND a.norm_address = b.norm_address);
-
 
 -- check
 SELECT *
