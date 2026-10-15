@@ -283,14 +283,15 @@ BEGIN
   END IF;
 
   -- 11. 身份未确认的异常要出现在报表里，不能被丢掉。
+  -- 断言的是"报表没有丢行"：事实表有几行，报表就要有几行。这样无论身份是否已确认
+  -- （孤立运行时维度表可能为空，集成运行时已被其他成员填充）都成立。
   SELECT count(*)::integer INTO v_count
-  FROM gold.fact_compliance_exception
-  WHERE customer_key IS NULL;
+  FROM gold.vw_kyc_aml_exception_report;
 
   IF v_count <> v_fact_rows THEN
     RAISE EXCEPTION
-      'Expected every exception to lack a dimension key while identity is unresolved, % of % rows have one',
-      v_fact_rows - v_count,
+      'The exception report holds % rows for % exception facts, so rows were dropped',
+      v_count,
       v_fact_rows;
   END IF;
 
