@@ -1,27 +1,23 @@
--- Step 1: load accounts, loans and transactions from Bronze into Silver.
--- Install: run this file once. Run: CALL silver.load_financials(DATE '2026-09-15');
--- p_date is the reporting date; only source data dated on or before it is used.
+-- Step 1: Load accounts, loans and transactions from Bronze into Silver.
+-- Run: CALL silver.load_financials(DATE '2026-09-15');
 BEGIN;
 
+-- Load one reporting date of financial data into Silver.
 CREATE OR REPLACE PROCEDURE silver.load_financials(p_date date)
 LANGUAGE plpgsql AS $$
 DECLARE
   v_run text := 'FIN-' || p_date;
 BEGIN
-  -- Stop if Silver already holds a later date. Silver keeps one current row per
-  -- account/loan, so loading an earlier date would overwrite newer amounts.
+  -- Stop if Silver already has a later date.
   IF EXISTS (SELECT 1 FROM silver.banking_account WHERE as_of_date > p_date)
      OR EXISTS (SELECT 1 FROM silver.loan WHERE as_of_date > p_date) THEN
     RAISE EXCEPTION 'Silver already holds data after %; earlier dates cannot be reloaded', p_date;
   END IF;
 
-  -- Remove the issues logged by the previous run for this date.
-  -- The checks below log them again if they still exist.
+  -- Clear old issues from the last run of this date.
   DELETE FROM silver.data_quality_issue WHERE validation_run_id = v_run;
 
-  -- Build a temporary candidate list of accounts: the latest version of each account
-  -- dated on or before p_date, from successful batches only, with the enterprise
-  -- customer_id taken from Member2's current ACCEPTED match (NULL when there is none).
+  -- Get the latest version of each account and its matched customer_id.
   DROP TABLE IF EXISTS tmp_account;
   CREATE TEMP TABLE tmp_account ON COMMIT DROP AS
   SELECT DISTINCT ON (r.source_system_id, r.source_account_reference)
@@ -38,7 +34,7 @@ BEGIN
   WHERE r.as_of_date <= p_date
   ORDER BY r.source_system_id, r.source_account_reference, r.source_record_version DESC;
 
-  -- Build the same temporary candidate list for loans.
+  -- Get the latest version of each loan and its matched customer_id.
   DROP TABLE IF EXISTS tmp_loan;
   CREATE TEMP TABLE tmp_loan ON COMMIT DROP AS
   SELECT DISTINCT ON (r.source_system_id, r.source_loan_reference)
@@ -55,9 +51,7 @@ BEGIN
   WHERE r.as_of_date <= p_date
   ORDER BY r.source_system_id, r.source_loan_reference, r.source_record_version DESC;
 
-  -- Log candidates that cannot be loaded into the shared data quality table:
-  -- no accepted customer match, non-AUD currency (accounts only), or a delete marker.
-  -- These rows are not loaded, and any OPEN issue blocks aggregation for this date.
+  -- Log rows that cannot be loaded (no customer match, non-AUD, delete).
   INSERT INTO silver.data_quality_issue (
     data_quality_issue_id, validation_run_id, data_layer, entity_name, record_reference,
     record_version_reference, rule_name, rule_version, issue_type, issue_description,
@@ -79,9 +73,7 @@ BEGIN
   ) x
   WHERE x.problem IS NOT NULL;
 
-  -- Insert valid accounts, or update them if they already exist (upsert).
-  -- account_id is an md5 of source + account reference, so the same account always
-  -- gets the same ID. Rows are only updated when a value has changed.
+  -- Insert or update valid accounts.
   INSERT INTO silver.banking_account AS t (
     account_id, customer_id, source_system_id, source_account_reference, account_type,
     account_status, current_balance, opened_date, closed_date, source_last_updated_at,
@@ -101,8 +93,7 @@ BEGIN
     credit_exposure = EXCLUDED.credit_exposure
   WHERE (t.*) IS DISTINCT FROM (EXCLUDED.*);
 
-  -- Insert or update valid loans in the same way.
-  -- Loan sources have no currency column; the team agreement treats them as AUD.
+  -- Insert or update valid loans (loans are treated as AUD).
   INSERT INTO silver.loan AS t (
     loan_id, customer_id, source_system_id, source_loan_reference, loan_type, loan_status,
     original_amount, outstanding_balance, interest_rate, start_date, maturity_date,
@@ -123,9 +114,7 @@ BEGIN
     credit_exposure = EXCLUDED.credit_exposure
   WHERE (t.*) IS DISTINCT FROM (EXCLUDED.*);
 
-  -- Insert transactions up to the end of p_date from successful batches whose parent
-  -- account is already in Silver. Transactions are events, so existing ones are skipped.
-  -- They are stored as detail only and are not used to change balances.
+  -- Insert new transactions for accounts already in Silver.
   INSERT INTO silver.account_transaction (
     transaction_id, account_id, source_system_id, source_transaction_reference,
     transaction_date, transaction_type, transaction_amount, transaction_status)
@@ -140,8 +129,7 @@ BEGIN
   WHERE r.transaction_date < p_date + 1
   ON CONFLICT (transaction_id) DO NOTHING;
 
-  -- Record that the load for this date has run. Aggregation checks this marker to tell
-  -- "customer has no products" apart from "the load never ran".
+  -- Mark that the load for this date has run.
   INSERT INTO silver.data_lineage_record (
     lineage_id, transformation_run_id, source_layer, source_entity_name,
     source_record_reference, source_version_reference, source_record_snapshot,
