@@ -1,19 +1,17 @@
--- Step 5: publish the daily customer snapshot (FACT_CUSTOMER_SNAPSHOT).
--- Install: run this file once. Run: CALL gold.publish_snapshot(DATE '2026-09-15', '<rules json>');
+-- Step 5: Publish the daily customer snapshot (FACT_CUSTOMER_SNAPSHOT).
+-- Run: CALL gold.publish_snapshot(DATE '2026-09-15', '<rules json>');
 -- Correct a published date: CALL gold.publish_snapshot(DATE '2026-09-15', '<rules json>', true);
--- Run after steps 1 and 2 and Member5's KYC/AML loading.
 BEGIN;
 
+-- Build and save one snapshot row per customer for a date.
 CREATE OR REPLACE PROCEDURE gold.publish_snapshot(
   p_date date, p_rules jsonb, p_allow_correction boolean DEFAULT false)
 LANGUAGE plpgsql AS $$
 BEGIN
-  -- Create (or reuse) the risk assessments for this date. The whole procedure runs in one
-  -- transaction, so a later failure also rolls these back.
+  -- Run the risk assessment for this date.
   CALL silver.assess_customer_risk(p_date, p_rules);
 
-  -- Stop if a customer with an account or loan has no dimension version valid at the end of
-  -- p_date; that customer would otherwise be missing from the snapshot.
+  -- Stop if a customer with products has no valid dimension version.
   IF EXISTS (
     SELECT 1 FROM silver.customer_master c
     WHERE (EXISTS (SELECT 1 FROM silver.banking_account a WHERE a.customer_id = c.customer_id)
@@ -25,11 +23,7 @@ BEGIN
     RAISE EXCEPTION 'A customer with products has no dimension version on %; run gold.load_dim_customer()', p_date;
   END IF;
 
-  -- Build the candidate snapshot in a temp table with the same structure as the fact table,
-  -- so values have the same precision when compared with published rows.
-  -- Each row combines the customer's financials, compliance status, the dimension version valid
-  -- at the end of p_date (not today's version) and the latest assessment for p_date (NULL when
-  -- the customer was not assessed). Placeholder customers with no products are skipped.
+  -- Build the new snapshot rows in a temp table.
   DROP TABLE IF EXISTS tmp_snapshot;
   CREATE TEMP TABLE tmp_snapshot (LIKE gold.fact_customer_snapshot) ON COMMIT DROP;
   INSERT INTO tmp_snapshot
@@ -46,6 +40,7 @@ BEGIN
     ON d.customer_id = f.customer_id
    AND d.effective_from < p_date + 1
    AND (d.effective_to IS NULL OR d.effective_to >= p_date + 1)
+  -- Use the latest assessment of this date.
   LEFT JOIN (
     SELECT DISTINCT ON (x.customer_id) x.*
     FROM silver.customer_risk_assessment x
@@ -55,9 +50,7 @@ BEGIN
   WHERE EXISTS (SELECT 1 FROM silver.banking_account b WHERE b.customer_id = f.customer_id)
      OR EXISTS (SELECT 1 FROM silver.loan l WHERE l.customer_id = f.customer_id);
 
-  -- Stop if a published row for this date would change or disappear, unless p_allow_correction
-  -- is true. A published row with no candidate makes to_jsonb(t) NULL, which counts as a change.
-  -- calculated_at is ignored because it differs on every run.
+  -- Stop if published rows would change, unless correction is allowed.
   IF NOT p_allow_correction AND EXISTS (
     SELECT 1 FROM gold.fact_customer_snapshot f
     LEFT JOIN tmp_snapshot t ON t.customer_snapshot_id = f.customer_snapshot_id
@@ -67,14 +60,12 @@ BEGIN
     RAISE EXCEPTION 'Snapshot for % changed; rerun with p_allow_correction => true to correct it', p_date;
   END IF;
 
-  -- Delete published rows for customers that no longer belong in this date's snapshot
-  -- (e.g. their only account was corrected away). Only reached on a correction or no change.
+  -- Remove rows for customers no longer in the snapshot.
   DELETE FROM gold.fact_customer_snapshot f
   WHERE f.snapshot_date = p_date
     AND NOT EXISTS (SELECT 1 FROM tmp_snapshot t WHERE t.customer_snapshot_id = f.customer_snapshot_id);
 
-  -- Insert new rows, or update existing ones (upsert). Rows are only updated when a value
-  -- other than calculated_at has changed, so an identical rerun keeps the original calculated_at.
+  -- Insert new rows or update changed rows.
   INSERT INTO gold.fact_customer_snapshot AS f
   SELECT * FROM tmp_snapshot
   ON CONFLICT (customer_snapshot_id) DO UPDATE SET
