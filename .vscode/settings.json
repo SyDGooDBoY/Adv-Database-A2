@@ -1,0 +1,33 @@
+{
+  "//": "Workspace settings for the SQL prototype. Keep this file small.",
+
+  "files.associations": {
+    "*.sql": "sql",
+    "*.mjs": "javascript"
+  },
+
+  "files.exclude": {
+    "**/node_modules": true,
+    "verification/member5-kyc-aml/out": true
+  },
+
+  "files.eol": "\n",
+  "files.trimTrailingWhitespace": true,
+  "files.insertFinalNewline": true,
+
+  "editor.tabSize": 2,
+  "editor.rulers": [100],
+
+  "[sql]": {
+    "editor.tabSize": 2,
+    "editor.insertSpaces": true
+  },
+
+  "search.exclude": {
+    "**/node_modules": true,
+    "**/pnpm-lock.yaml": true
+  },
+
+  "//tests": "The two suites are wired as tasks, so Ctrl+Shift+P > Run Task works without a terminal.",
+  "terminal.integrated.cwd": "${workspaceFolder}"
+}

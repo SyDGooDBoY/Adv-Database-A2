@@ -1,0 +1,72 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "1. Install test dependencies (once)",
+      "type": "shell",
+      "command": "pnpm",
+      "args": ["install"],
+      "options": { "cwd": "${workspaceFolder}/verification/member5-kyc-aml" },
+      "problemMatcher": []
+    },
+    {
+      "label": "2. Static check - parse every module script",
+      "type": "shell",
+      "command": "python",
+      "args": ["validate_syntax.py"],
+      "options": { "cwd": "${workspaceFolder}/advanced-database-assignment2/sql/guanbo" },
+      "problemMatcher": [],
+      "presentation": { "reveal": "always", "panel": "shared" }
+    },
+    {
+      "label": "3. Module test - my code on its own",
+      "type": "shell",
+      "command": "node",
+      "args": ["verify.mjs"],
+      "options": { "cwd": "${workspaceFolder}/verification/member5-kyc-aml" },
+      "dependsOn": ["1. Install test dependencies (once)"],
+      "problemMatcher": [],
+      "group": { "kind": "test", "isDefault": true },
+      "presentation": { "reveal": "always", "panel": "shared" }
+    },
+    {
+      "label": "4. Integration test - all six members together",
+      "type": "shell",
+      "command": "node",
+      "args": ["integration.mjs"],
+      "options": { "cwd": "${workspaceFolder}/verification/member5-kyc-aml" },
+      "dependsOn": ["1. Install test dependencies (once)"],
+      "problemMatcher": [],
+      "presentation": { "reveal": "always", "panel": "shared" }
+    },
+    {
+      "label": "5. Print the reported figures",
+      "type": "shell",
+      "command": "node",
+      "args": ["figures.mjs"],
+      "options": { "cwd": "${workspaceFolder}/verification/member5-kyc-aml" },
+      "problemMatcher": [],
+      "presentation": { "reveal": "always", "panel": "shared" }
+    },
+    {
+      "label": "6. Audits - dead code and comments",
+      "type": "shell",
+      "command": "python",
+      "args": ["analyse.py"],
+      "options": { "cwd": "${workspaceFolder}/verification/member5-kyc-aml" },
+      "problemMatcher": [],
+      "presentation": { "reveal": "always", "panel": "shared" }
+    },
+    {
+      "label": "Run everything (static, module, integration)",
+      "type": "shell",
+      "command": "node",
+      "args": ["run-all.mjs"],
+      "options": { "cwd": "${workspaceFolder}/verification/member5-kyc-aml" },
+      "dependsOn": ["1. Install test dependencies (once)"],
+      "problemMatcher": [],
+      "group": { "kind": "build", "isDefault": true },
+      "presentation": { "reveal": "always", "panel": "shared" }
+    }
+  ]
+}
