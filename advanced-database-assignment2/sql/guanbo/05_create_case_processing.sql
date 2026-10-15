@@ -1,15 +1,15 @@
 -- PostgreSQL 15+
--- Member 5：案件的建立与状态流转（验证案件与 AML 案件）。
--- 两条规则：可报告的发现建立对应案件，同一问题重复发现时复用已有案件；
--- 案件状态必须与结案时间一致，问题清除后才结案。
--- AML 筛查警报只是疑似，所以它开的是复核案件而不是定性结论。
+-- Member 5: opening cases and moving their status, for verification cases and AML cases.
+-- Two rules: a reportable finding opens its case, and a repeated finding reuses the open case;
+-- case status has to agree with the closing timestamp, and a case closes only once cleared.
+-- An AML alert is only a suspicion, so its case is a review, not a conclusion.
 
--- 返回该 KYC 发现对应的验证案件；不存在则新建。
--- 通用"查找或建立案件"步骤，两个专用函数共用。
+-- Returns the verification case for a KYC finding, opening one when none exists.
+-- The shared find-or-open step used by both case-specific functions.
 --
--- 三段逻辑：按主体与案件类型找已有案件；找到就复用；找不到才生成编号并插入
--- （编号由"事件 + 案件类型"算出，同一问题重复检测会落到同一编号）。
--- 最后返回案件编号与触发类型，专用函数直接取用，不再各写一遍。
+-- Three steps: look for a case by subject and case type, reuse it when found, otherwise
+-- derive an identifier and insert. The identifier is derived from event and case type, so a
+-- repeated detection lands on the same row. Returns the case id and trigger type.
 CREATE OR REPLACE FUNCTION silver.find_or_open_case(
   p_entity varchar,
   p_case_type varchar,
@@ -35,7 +35,7 @@ DECLARE
   v_prefix varchar;
   v_case_id varchar(50);
 BEGIN
-  -- 取出主体信息，并定下要写哪张案件表
+  -- Read the subject, and decide which case table is written.
   IF p_entity = 'KYC' THEN
     SELECT verification.customer_id, verification.source_customer_record_id
     INTO v_customer_id, v_source_record_id
@@ -50,7 +50,7 @@ BEGIN
       WHEN v_customer_id IS NOT NULL THEN 'GOLDEN_CUSTOMER'
       ELSE 'SOURCE_CUSTOMER_RECORD'
     END;
-    -- 立案时间取触发事件的业务时间，重跑脚本不会让账龄凭空变大
+    -- Opened at the event's business time, so a rerun cannot inflate the case age.
     v_open_at := COALESCE((
       SELECT max(lineage.transformation_timestamp)
       FROM silver.data_lineage_record lineage
@@ -86,10 +86,10 @@ BEGIN
         AND lineage.transformation_name = 'PUBLISH_AML_SCREENING_EVENT'
     ), clock_timestamp());
   ELSE
-    RAISE EXCEPTION '不支持的类型 %，应为 KYC 或 AML', p_entity;
+    RAISE EXCEPTION 'Unsupported entity %: expected KYC or AML', p_entity;
   END IF;
 
-  -- 同一主体 + 同一案件类型只保留一个案件
+  -- One case per subject and case type.
   EXECUTE format(
     'SELECT %I FROM %s
      WHERE case_type = $1
@@ -105,7 +105,7 @@ BEGIN
   IF v_case_id IS NULL THEN
     v_case_id := v_prefix || upper(substr(md5(p_record_id || ':' || p_case_type), 1, 16));
 
-    -- 案件严重程度用案件自己的量级，不出现 BLOCKING（那是数据问题的量级）
+    -- Case severity uses the case scale, so BLOCKING never appears: that belongs to data issues.
     IF p_entity = 'KYC' THEN
       INSERT INTO silver.special_verification_case (
         verification_case_id, customer_id, source_customer_record_id, match_id,
@@ -127,7 +127,7 @@ BEGIN
       )
       ON CONFLICT (verification_case_id) DO NOTHING;
     ELSE
-      -- AML 案件的风险等级上限是 HIGH，所以 BLOCKING 映射为 HIGH 而非 CRITICAL
+      -- AML risk tops out at HIGH, so BLOCKING maps to HIGH rather than CRITICAL.
       INSERT INTO silver.aml_case (
         aml_case_id, customer_id, source_customer_record_id, aml_screening_id,
         assigned_user_id, trigger_type, trigger_reference, case_type,
@@ -149,9 +149,9 @@ BEGIN
       ON CONFLICT (aml_case_id) DO NOTHING;
     END IF;
 
-    RAISE NOTICE '新开案件 %（% / %）', v_case_id, p_case_type, p_record_id;
+    RAISE NOTICE 'Opened case % (% / %)', v_case_id, p_case_type, p_record_id;
   ELSE
-    RAISE NOTICE '复用已有案件 %（% / %）', v_case_id, p_case_type, p_record_id;
+    RAISE NOTICE 'Reused case % (% / %)', v_case_id, p_case_type, p_record_id;
   END IF;
 
   RETURN jsonb_build_object('case_id', v_case_id, 'trigger_type', v_trigger_type);
@@ -159,9 +159,9 @@ END;
 $find_or_open$;
 
 COMMENT ON FUNCTION silver.find_or_open_case(varchar, varchar, varchar, varchar, text, varchar, varchar) IS
-  '通用的查找或建立案件步骤：同一主体加同一案件类型只保留一个案件，已存在则复用。KYC 与 AML 共用。';
+  'Shared find-or-open step: one case per subject and case type, reused when it already exists. Used by both KYC and AML.';
 
--- 验证案件：包装通用步骤。KYC 类发现的案件号要回填到数据质量问题表，所以要返回编号。
+-- Verification case: wraps the shared step and returns the id, which is written back to the issue.
 CREATE OR REPLACE FUNCTION silver.find_or_open_verification_case(
   p_case_type varchar,
   p_kyc_verification_id varchar,
@@ -178,9 +178,9 @@ AS $open_verification_case$
 $open_verification_case$;
 
 COMMENT ON FUNCTION silver.find_or_open_verification_case(varchar, varchar, varchar, text, varchar) IS
-  '查找或建立验证案件并返回案件编号。同一验证事件加同一案件类型只保留一个案件。';
+  'Find or open a verification case and return its identifier. One case per verification event and case type.';
 
--- AML 案件：数据质量问题表里没有对应列可回填，所以只建案、不回填。
+-- AML case: the issue table has no AML column to write back to, so nothing is returned.
 CREATE OR REPLACE FUNCTION silver.find_or_open_aml_case(
   p_case_type varchar,
   p_aml_screening_id varchar,
@@ -197,10 +197,10 @@ AS $open_aml_case$
 $open_aml_case$;
 
 COMMENT ON FUNCTION silver.find_or_open_aml_case(varchar, varchar, varchar, text, varchar) IS
-  '查找或建立 AML 调查案件并返回案件编号。复用逻辑与验证案件一致。';
+  'Find or open an AML investigation case and return its identifier. Reuse works as for verification cases.';
 
--- 按发现所属的表分派到对应的建案函数。
--- KYC 类返回验证案件编号；AML 类返回 NULL，因为数据质量问题表只有验证案件这一列外键。
+-- Dispatch a finding to the right case-opening function.
+-- KYC returns a verification case id; AML returns NULL, since the issue table only links a verification case.
 CREATE OR REPLACE FUNCTION silver.resolve_compliance_case(
   p_entity_name varchar,
   p_case_type varchar,
@@ -239,7 +239,7 @@ $resolve_case$;
 COMMENT ON FUNCTION silver.resolve_compliance_case(varchar, varchar, varchar, varchar, text, varchar) IS
   'Opens or reuses the case for one finding and returns the verification case link expected by silver.data_quality_issue.';
 
--- 为所有未结发现建立或复用案件，并回填 KYC 类的案件编号。可重复执行。
+-- Open or reuse a case for every open finding and write back the KYC case id. Safe to rerun.
 CREATE OR REPLACE PROCEDURE silver.publish_compliance_cases(
   p_batch_id varchar DEFAULT NULL
 )
@@ -249,8 +249,8 @@ DECLARE
   v_open_issues integer;
   v_linked_issues integer := 0;
 BEGIN
-  -- 数据质量问题表存的是事件的来源编号，建案函数按主键定位已发布记录，
-  -- 所以这里先把主键解析出来。
+  -- The issue table holds the source reference while the case functions address the published
+  -- record by its key, so the key is resolved here first.
   DROP TABLE IF EXISTS tmp_compliance_case_issue;
   CREATE TEMP TABLE tmp_compliance_case_issue ON COMMIT DROP AS
   SELECT
@@ -265,8 +265,8 @@ BEGIN
     issue.rule_name,
     issue.issue_description,
     issue.severity,
-    -- 规则到案件类型的映射由 04_create_kyc_aml_validation.sql 统一提供；
-    -- 没有映射的规则只登记质量问题、不建案件。
+    -- The rule-to-case mapping comes from 04_create_kyc_aml_validation.sql;
+    -- a rule without a mapping stays a quality record.
     silver.compliance_rule_case_type(issue.rule_name) AS case_type
   FROM silver.data_quality_issue issue
   LEFT JOIN silver.kyc_verification_record verification
@@ -306,7 +306,7 @@ BEGIN
     )
     FROM tmp_compliance_case_issue case_issue
     WHERE issue.data_quality_issue_id = case_issue.data_quality_issue_id
-      -- 没有案件映射的规则不建案、也不回填案件号。
+      -- A rule with no case mapping opens nothing and writes nothing back.
       AND case_issue.case_type IS NOT NULL;
     GET DIAGNOSTICS v_linked_issues = ROW_COUNT;
   END IF;
@@ -319,9 +319,9 @@ $publish_cases$;
 COMMENT ON PROCEDURE silver.publish_compliance_cases(varchar) IS
   'Opens or reuses the compliance case for every open KYC/AML finding and links KYC findings to their verification case.';
 
--- 按当前证据回填案件状态：规则已不再报告的发现置为已解决；
--- 最后一个未结发现清除的验证案件置为 RESOLVED；警报不再成立的 AML 案件置为 CLOSED；
--- 仍有未结发现的案件保持未结，使账龄能持续累积。
+-- Reconcile case status against current evidence: findings the rules no longer report are resolved;
+-- a verification case whose last open finding cleared becomes RESOLVED; an AML case whose alert
+-- no longer stands becomes CLOSED; a case that still has an open finding stays open so its age accrues.
 CREATE OR REPLACE PROCEDURE silver.progress_compliance_cases(
   p_reference_date date DEFAULT current_date,
   p_batch_id varchar DEFAULT NULL

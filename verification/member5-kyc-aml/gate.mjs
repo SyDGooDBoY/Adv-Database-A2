@@ -1,11 +1,23 @@
 // Final gate for the Member 5 module: encoding, syntax, and end-to-end execution.
-import { readFileSync, readdirSync } from "node:fs";
+import { readFileSync, readdirSync, existsSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { execFileSync } from "node:child_process";
 
 const moduleDir = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "advanced-database-assignment2", "sql", "guanbo");
-const python = process.env.DSH_PYTHON;
+
+// Resolve the interpreter before using it. Reading only DSH_PYTHON meant that in an
+// ordinary shell the variable was undefined and the parse step failed with
+// "The file argument must be of type string. Received undefined", which looks like
+// a module defect rather than a missing setting.
+function resolvePython() {
+  for (const candidate of [process.env.DSH_PYTHON, process.env.PYTHON]) {
+    if (candidate && existsSync(candidate)) return candidate;
+  }
+  return "python";
+}
+
+const python = resolvePython();
 let failed = 0;
 
 // 1. No BOM, and no CRLF surprises inside dollar-quoted bodies.

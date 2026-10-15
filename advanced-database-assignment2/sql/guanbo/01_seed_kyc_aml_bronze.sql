@@ -1,11 +1,11 @@
 -- PostgreSQL 15+
--- Member 5：KYC/AML 模块在 Bronze 层的输入数据。
+-- Member 5: the Bronze-layer input for the KYC/AML module.
 --
--- 【为什么要在这里塞种子数据】
---   数据来自仓库里的合成 CSV。为了让模块在 CloudBeaver 里能直接跑起来，不依赖
---   "PostgreSQL 服务器能读到本地 Windows 路径"，所以把 CSV 内容写成 INSERT。
+-- Why the seed data is written out as INSERTs rather than read from the CSV files:
+--   the synthetic CSVs live in the repository, but reading them would depend on the
+--   server being able to see a local Windows path, so the rows are inlined here instead.
 
--- 批次控制信息：一处定义，两处使用
+-- Batch control rows: defined once, used by both the source and the Silver registry.
 CREATE OR REPLACE PROCEDURE silver.seed_kyc_aml_batches()
 LANGUAGE plpgsql
 AS $seed_batches$
@@ -18,7 +18,7 @@ DECLARE
 BEGIN
   FOREACH v_batch SLICE 1 IN ARRAY v_batches
   LOOP
-    -- 模拟业务库
+    -- Simulated source systems.
     INSERT INTO source_systems.ingestion_batch (
       batch_id, source_system_id, load_type, started_at, completed_at,
       load_status, records_received, records_processed, watermark_start, watermark_end
@@ -29,7 +29,7 @@ BEGIN
     )
     ON CONFLICT (batch_id) DO NOTHING;
 
-    -- 集成控制层。已存在的批次保持原样，免得覆盖 Member 1 记录的失败状态。
+    -- Integration control layer. Existing batches are left alone so Member 1's recorded failure state is not overwritten.
     INSERT INTO silver.ingestion_batch (
       batch_id, source_system_id, load_type, started_at, completed_at,
       load_status, records_received, records_processed, watermark_start, watermark_end
@@ -43,7 +43,7 @@ BEGIN
 END;
 $seed_batches$;
 
--- 来源系统定义（Silver 的外键要求它先存在）
+-- Source system definitions. Silver's foreign keys require these to exist first.
 INSERT INTO silver.source_system (
   source_system_id, system_name, system_type, system_description, system_owner, active_flag
 )
@@ -65,11 +65,11 @@ CALL silver.seed_kyc_aml_batches();
 
 DROP PROCEDURE silver.seed_kyc_aml_batches();
 
--- KYC 验证原始数据：data/synthetic/raw_kyc_verification.csv（B1-AMLKYC，9 条）
+-- Raw KYC verification rows: data/synthetic/raw_kyc_verification.csv (batch B1-AMLKYC, 9 rows).
 DO $seed_kyc_verification$
 BEGIN
   IF EXISTS (SELECT 1 FROM bronze.raw_kyc_verification WHERE batch_id = 'B1-AMLKYC') THEN
-    RAISE NOTICE 'Bronze 已有 B1-AMLKYC 的 KYC 行，跳过种子数据';
+    RAISE NOTICE 'Bronze already holds the B1-AMLKYC KYC rows; seed data skipped';
     RETURN;
   END IF;
 
@@ -90,15 +90,15 @@ BEGIN
     ('BR-KYC-008', 'AMLKYC', 'B1-AMLKYC', 'VFY-012', 'KYC-012', 'IDENTITY_DOCUMENT', 'EXPIRED',          timestamp '2026-09-01 07:00:00', date '2026-08-15', 'LOW',    NULL, timestamp '2026-09-01 08:22:00'),
     ('BR-KYC-009', 'AMLKYC', 'B1-AMLKYC', 'VFY-014', 'KYC-014', 'IDENTITY_DOCUMENT', 'VERIFIED',         timestamp '2026-09-01 07:00:00', date '2028-09-01', 'LOW',    NULL, timestamp '2026-09-01 08:22:00');
 
-  RAISE NOTICE '已写入 9 条 Bronze KYC 验证行（B1-AMLKYC）';
+  RAISE NOTICE 'Inserted 9 Bronze KYC verification rows for B1-AMLKYC';
 END
 $seed_kyc_verification$;
 
--- AML 筛查原始数据：data/synthetic/raw_aml_screening.csv（B1 九条 + B2 一条）
+-- Raw AML screening rows: data/synthetic/raw_aml_screening.csv (9 for B1, 1 for B2).
 DO $seed_aml_screening$
 BEGIN
   IF EXISTS (SELECT 1 FROM bronze.raw_aml_screening WHERE batch_id = 'B1-AMLKYC') THEN
-    RAISE NOTICE 'Bronze 已有 B1-AMLKYC 的 AML 行，跳过种子数据';
+    RAISE NOTICE 'Bronze already holds the B1-AMLKYC AML rows; seed data skipped';
   ELSE
     INSERT INTO bronze.raw_aml_screening (
       bronze_record_reference, source_system_id, batch_id, source_screening_reference,
@@ -116,12 +116,12 @@ BEGIN
       ('BR-SCR-008', 'AMLKYC', 'B1-AMLKYC', 'SCR-012-1', 'KYC-012', 'SANCTIONS', timestamp '2026-09-01 07:20:00', 'CLEAR', 0.0200, 'SYN-012', false, timestamp '2026-09-01 08:23:00'),
       ('BR-SCR-009', 'AMLKYC', 'B1-AMLKYC', 'SCR-014-1', 'KYC-014', 'SANCTIONS', timestamp '2026-09-01 07:20:00', 'CLEAR', 0.0200, 'SYN-014', false, timestamp '2026-09-01 08:23:00');
 
-    RAISE NOTICE '已写入 9 条 Bronze AML 筛查行（B1-AMLKYC）';
+    RAISE NOTICE 'Inserted 9 Bronze AML screening rows for B1-AMLKYC';
   END IF;
 
-  -- B2 那条：监控名单疑似命中，演示里的 AML 异常来源
+  -- The B2 row is a suspected watchlist hit, and is the source of the reported AML exception.
   IF EXISTS (SELECT 1 FROM bronze.raw_aml_screening WHERE batch_id = 'B2-AMLKYC') THEN
-    RAISE NOTICE 'Bronze 已有 B2-AMLKYC 的 AML 行，跳过种子数据';
+    RAISE NOTICE 'Bronze already holds the B2-AMLKYC AML row; seed data skipped';
   ELSE
     INSERT INTO bronze.raw_aml_screening (
       bronze_record_reference, source_system_id, batch_id, source_screening_reference,
@@ -131,20 +131,20 @@ BEGIN
     VALUES
       ('BR-SCR-010', 'AMLKYC', 'B2-AMLKYC', 'SCR-005-2', 'KYC-005', 'WATCHLIST', timestamp '2026-09-15 07:25:00', 'POTENTIAL_MATCH', 0.9200, 'SYN-HIT-005', true, timestamp '2026-09-15 08:24:00');
 
-    RAISE NOTICE '已写入 1 条 Bronze AML 筛查行（B2-AMLKYC：监控名单疑似命中）';
+    RAISE NOTICE 'Inserted 1 Bronze AML screening row for B2-AMLKYC: suspected watchlist hit';
   END IF;
 END
 $seed_aml_screening$;
 
 -- ============================================================================
--- AML/KYC 客户资料：data/synthetic/raw_aml_kyc_customer.csv（9 条）
--- 这些属性用于给本模块的事件建立客户身份，让报表显示真实姓名而不是占位符。
--- 其中 KYC-nnn 与上面事件引用的来源客户编号一致。
+-- AML/KYC customer profile rows: data/synthetic/raw_aml_kyc_customer.csv (9 rows).
+-- These attributes give the module's events a customer identity, so a report shows a real name rather than a placeholder.
+-- The KYC-nnn references match the source customer references used by the events above.
 -- ============================================================================
 DO $seed_aml_kyc_customer$
 BEGIN
   IF EXISTS (SELECT 1 FROM bronze.raw_aml_kyc_customer WHERE batch_id = 'B1-AMLKYC') THEN
-    RAISE NOTICE 'Bronze 已有 AML/KYC 客户资料，跳过种子数据';
+    RAISE NOTICE 'Bronze already holds the AML/KYC customer profiles; seed data skipped';
     RETURN;
   END IF;
 
@@ -165,6 +165,6 @@ BEGIN
     ('BR-AML-C-008', 'AMLKYC', 'B1-AMLKYC', 'KYC-012', 1, 'I', 'Leo Martin',    date '1968-10-07', 'leo.martin@example.test',    '0412001012', '16 Bay Street, Rockdale NSW 2216',   'ACTIVE', timestamp '2026-09-01 07:40:00', timestamp '2026-09-01 08:14:00'),
     ('BR-AML-C-009', 'AMLKYC', 'B1-AMLKYC', 'KYC-014', 1, 'I', 'Lucas Park',    date '1991-04-19', 'lucas.park@example.test',    '0412001014', '7 North Street, Burwood NSW 2134',   'ACTIVE', timestamp '2026-09-01 07:40:00', timestamp '2026-09-01 08:14:00');
 
-  RAISE NOTICE '已写入 9 条 Bronze AML/KYC 客户资料';
+  RAISE NOTICE 'Inserted 9 Bronze AML/KYC customer profile rows';
 END
 $seed_aml_kyc_customer$;

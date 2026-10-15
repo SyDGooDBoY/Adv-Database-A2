@@ -1,6 +1,6 @@
 -- PostgreSQL 15+
--- Member 5：给案件与事实表加 CHECK 约束，并建配套索引。
--- 约束用守卫方式添加，可重复执行；违反约束会直接报错而不是被静默忽略。
+-- Member 5: CHECK constraints for the case and fact tables, with supporting indexes.
+-- Constraints are added behind a guard so the module can be rerun; a violation raises rather than being skipped.
 
 DO $compliance_rules$
 DECLARE
@@ -154,7 +154,7 @@ BEGIN
 END
 $compliance_rules$;
 
--- 校验与案件复用所需的支撑索引。
+-- Supporting indexes for the validation and case-reuse lookups.
 CREATE INDEX IF NOT EXISTS ix_kyc_verification_record_customer
   ON silver.kyc_verification_record (customer_id, verification_date DESC);
 
