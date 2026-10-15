@@ -1,11 +1,11 @@
 -- PostgreSQL 15+
--- Member 5：合规异常累积快照事实表。一个来源案件一行，未结案件刷新时更新原行。
--- 规则：两个案件编号必有且仅有一个，并与来源类型一致；每个案件只出现一次；
--- 身份未确认时 customer_key 为空，报表用左连接保留；账龄算到结案日或报告基准日。
+-- Member 5: the accumulating snapshot fact for compliance exceptions, one row per source case.
+-- Rules: exactly one case reference per row, agreeing with the source type; each case appears
+-- once; customer_key stays null while identity is unresolved; age runs to closing or the as-of date.
 
--- 修正共享建表的两个唯一索引：每行只填一个案件编号、另一列为 NULL，而 PostgreSQL
--- 唯一索引把 NULL 视为互不相同，会导致每类案件只能插入一行。
--- 改为排除 NULL 的部分唯一索引，既允许 NULL 又保证每个案件只出现一次。
+-- Fix for two unique indexes in the shared setup. Each row fills one case reference and leaves
+-- the other null, and PostgreSQL treats nulls in a unique index as distinct, so only one row of
+-- each type could be inserted. Partial indexes keep both the nulls and the one-row-per-case rule.
 DO $fact_indexes$
 BEGIN
   IF EXISTS (
@@ -105,11 +105,11 @@ BEGIN
 
   DROP TABLE IF EXISTS tmp_compliance_exception_fact;
 
-  -- 两类案件合成一张事实表。
+  -- Both case types projected into one fact table.
   --
-  -- 原先写成两个 UNION ALL 分支，每个分支各写一遍状态映射、客户代理键查找、
-  -- 账龄计算和结案日选择——同一个口径写两遍，容易改一处漏一处。现在 UNION ALL
-  -- 只负责"把两边的列名和取值统一"，后续计算只写一遍。
+  -- This was two UNION ALL branches, each repeating the status mapping, the customer key
+  -- lookup, the age calculation and the closing date. Writing one rule twice invites fixing
+  -- one copy and missing the other, so UNION ALL now only aligns the columns.
   CREATE TEMP TABLE tmp_compliance_exception_fact ON COMMIT DROP AS
   WITH exception_case AS (
     SELECT
@@ -148,7 +148,7 @@ BEGIN
     exception_case.aml_case_id,
     exception_case.source_type AS exception_source_type,
     exception_case.case_type AS exception_type,
-    -- 异常状态是事实表自己对案件的看法，由案件状态映射而来
+    -- Exception status is the fact's own view of the case, mapped from the case status.
     CASE exception_case.case_status
       WHEN 'OPEN' THEN 'OPEN'
       WHEN 'IN_REVIEW' THEN 'IN_REVIEW'
@@ -159,8 +159,8 @@ BEGIN
     exception_case.opened_at::date AS opened_date,
     exception_case.closed_at::date AS resolved_date,
     p_as_of_date AS as_of_date,
-    -- 账龄 = 结案日（未结案取报告基准日）− 开案日，并按报告基准日封顶，避免出现
-    -- "比报告期还久"的自相矛盾数字。resolved_date 仍记录真实结案日。
+    -- Age runs from opening to closing, or to the as-of date while open, and is capped there
+    -- so a report cannot claim an age longer than its period. resolved_date keeps the real date.
     GREATEST(
       LEAST(COALESCE(exception_case.closed_at::date, p_as_of_date), p_as_of_date)
         - exception_case.opened_at::date,
@@ -218,7 +218,7 @@ BEGIN
     days_open = EXCLUDED.days_open,
     last_updated_at = EXCLUDED.last_updated_at;
 
-  -- 来源案件已不存在的陈旧事实行会破坏"每个案件只出现一次"，予以清理。
+  -- A stale fact row whose case is gone would break the one-row-per-case rule, so it is removed.
   DELETE FROM gold.fact_compliance_exception fact
   WHERE NOT EXISTS (
     SELECT 1

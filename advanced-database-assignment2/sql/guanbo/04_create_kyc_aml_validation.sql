@@ -1,13 +1,13 @@
 -- PostgreSQL 15+
--- Member 5：KYC/AML 校验规则，以及把发现登记为数据质量问题。
+-- Member 5: the KYC/AML validation rules, and registration of findings as data quality issues.
 --
--- 结构：标识生成 / 身份解析 / KYC 规则 8 条 / AML 规则 10 条 / 规则到案件类型映射 / 问题登记。
--- 设计：每条记录只保留最严重的一条发现（两个函数共用末尾同一套排序）；规则不负责建案件，
---       建案在 05_create_case_processing.sql；批次参数传 NULL 表示检查全部批次并取最新版本。
+-- Layout: identifiers, identity resolution, 8 KYC rules, 10 AML rules, rule-to-case mapping, registration.
+-- Design: each record keeps only its most severe finding, ordered by one shared ranking; a rule never
+--       opens a case itself, and a NULL batch means every batch at its latest Bronze version.
 
--- 用"来源系统 + 来源编号"算出主键。固定算法带来两个好处：
---   1. 重复处理同一批数据得到同一个编号，天然幂等，不会重复插入；
---   2. 别处只拿到业务编号也能定位到已发布事件，不必回查数据库。
+-- The key is derived from the source system and reference, which gives two properties:
+--   1. reprocessing the same data yields the same key, so inserts stay idempotent;
+--   2. a published event can be located from its business reference without a lookup.
 CREATE OR REPLACE FUNCTION silver.kyc_verification_id(
   p_source_system_id varchar,
   p_source_kyc_reference varchar
@@ -31,17 +31,17 @@ AS $aml_id$
 $aml_id$;
 
 COMMENT ON FUNCTION silver.kyc_verification_id(varchar, varchar) IS
-  '由"来源系统 + 来源 KYC 编号"生成稳定的验证事件主键，保证重复处理不会产生重复行。';
+  'Stable verification event key derived from the source system and source KYC reference, so reprocessing adds no duplicate rows.';
 
 COMMENT ON FUNCTION silver.aml_screening_id(varchar, varchar) IS
-  '由"来源系统 + 来源筛查编号"生成稳定的筛查事件主键，作用同 KYC 版本。';
+  'Stable screening event key derived from the source system and source screening reference, as for the KYC version.';
 
--- 第 2 节  身份解析（两个检测函数共用）
+-- Section 2: identity resolution, shared by both detection functions
 
--- 一条事件要能回答"当事人是谁"。本函数返回两个编号：
---   source_customer_record_id：来源系统里那条客户记录，在 Silver 中对应哪条记录
---   customer_id              ：如果已成功合并，对应的金客户编号
--- 任何一个查不到就返回 NULL，调用方据此判断"身份尚未合并"。
+-- An event has to answer who it is about. This function returns two identifiers:
+--   source_customer_record_id: the Silver record for that source customer reference
+--   customer_id: the golden customer it merged into, when the merge succeeded
+-- Either is NULL when nothing is found, which is how a caller detects an unresolved identity.
 CREATE OR REPLACE FUNCTION silver.resolve_event_identity(
   p_entity varchar,
   p_source_system_id varchar,
@@ -58,7 +58,7 @@ AS $resolve_identity$
 DECLARE
   v_customer_reference varchar(100);
 BEGIN
-  -- 先从对应事件表里取出这条事件引用的"来源客户编号"
+  -- Read the source customer reference this event points at.
   IF p_entity = 'KYC' THEN
     SELECT btrim(raw.source_customer_reference)
     INTO v_customer_reference
@@ -78,7 +78,7 @@ BEGIN
     ORDER BY raw.ingested_at DESC, raw.batch_id DESC, raw.bronze_record_reference DESC
     LIMIT 1;
   ELSE
-    RAISE EXCEPTION '不支持的类型 %，应为 KYC 或 AML', p_entity;
+    RAISE EXCEPTION 'Unsupported entity %: expected KYC or AML', p_entity;
   END IF;
 
   SELECT min(source_record.source_customer_record_id)
@@ -88,7 +88,7 @@ BEGIN
     AND source_record.source_customer_reference = v_customer_reference
     AND source_record.is_current_version;
 
-  -- 只有状态 ACCEPTED 且当前有效的匹配才算"身份已确认"
+  -- Only a current ACCEPTED match counts as a confirmed identity.
   SELECT min(current_match.customer_id)
   INTO customer_id
   FROM silver.source_customer_record source_record
@@ -104,9 +104,9 @@ END;
 $resolve_identity$;
 
 COMMENT ON FUNCTION silver.resolve_event_identity(varchar, varchar, varchar, varchar) IS
-  '解析一条事件对应的来源客户记录与金客户编号；查不到返回 NULL，表示身份尚未合并。';
+  'Resolve the source customer record and golden customer for one event. NULL means the identity is not merged yet.';
 
--- 第 3 节  KYC 验证规则（8 条）
+-- Section 3: the eight KYC verification rules
 
 DROP FUNCTION IF EXISTS silver.detect_kyc_verification_issues(varchar, date);
 
@@ -133,7 +133,7 @@ AS $detect_kyc$
   WITH reference_date AS (
     SELECT COALESCE(p_reference_date, current_date) AS as_of_date
   ),
-  -- 每个来源编号只取最新一版 Bronze 行；批次传 NULL 时即"全批次取最新"
+  -- One latest Bronze version per reference; a NULL batch means the latest across all batches.
   staged AS (
     SELECT DISTINCT ON (raw.source_system_id, btrim(raw.source_kyc_reference))
       raw.bronze_record_reference,
@@ -154,7 +154,7 @@ AS $detect_kyc$
       raw.batch_id DESC,
       raw.bronze_record_reference DESC
   ),
-  -- 补上身份信息，并算出"类型/状态是否可识别"
+  -- Attach identity, and work out whether the type and status are recognised values.
   evaluated AS (
     SELECT
       staged.*,
@@ -174,18 +174,18 @@ AS $detect_kyc$
       'KYC', staged.source_system_id, staged.source_kyc_reference, p_batch_id
     ) identity
   ),
-  -- 把 8 条规则的判断条件在这里算出来，下面按规则逐条列发现
+  -- Evaluate the eight rule conditions here; the blocks below project them into findings.
   evaluated_rules AS (
     SELECT
       evaluated.*,
-      -- 有效期已过（验证时间本身晚于基准日的不算过期）
+      -- Expired. A verification dated after the reference date is not treated as expired.
       (
         evaluated.expiry_date IS NOT NULL
         AND evaluated.verification_date::date < evaluated.as_of_date
         AND evaluated.expiry_date < evaluated.as_of_date
         AND evaluated.verification_status NOT IN ('PENDING', 'MISSING_DOCUMENT', 'FAILED')
       ) AS is_expired,
-      -- 状态写着"已验证"，但按记录的有效期已不能依赖
+      -- Marked verified, but the recorded expiry no longer supports that claim.
       (
         evaluated.verification_status = 'VERIFIED'
         AND (
@@ -194,20 +194,20 @@ AS $detect_kyc$
           OR evaluated.expiry_date < evaluated.as_of_date
         )
       ) AS is_discrepancy,
-      -- 验证没有完成，构成资料缺口
+      -- Verification did not complete, which is an evidence gap.
       evaluated.verification_status IN ('PENDING', 'MISSING_DOCUMENT', 'FAILED') AS is_gap
     FROM evaluated
   ),
-  -- 每个规则块只写本规则特有的内容：e.* 展开 evaluated_rules 的公共列（来源编号、身份等），
-  -- 其后是规则名、问题类型、严重程度，末项为去重用的规则优先级。
-  -- 8 条规则各自的命中结果，统一成一张发现清单
+  -- Each rule block carries only what is specific to that rule: e.* expands the shared
+  -- evaluated_rules columns, then the rule name, issue type, severity and dedup priority.
+  -- The eight rules' hits, projected into one finding list.
   findings AS (
     SELECT
       e.*,
       'subject_reference' AS issue_attribute_name,
       'KYC_EVENT_SUBJECT_REQUIRED' AS rule_name,
       'KYC_SUBJECT_MISSING' AS issue_type,
-      '这条验证事件既没有金客户也没有来源客户记录，缺少主体引用。' AS issue_description,
+      'This verification event has neither a golden customer nor a source customer record, so it carries no subject reference.' AS issue_description,
       'BLOCKING' AS issue_severity, NULL::varchar AS rule_case_type, 1 AS rule_priority
     FROM evaluated_rules e
     WHERE e.customer_id IS NULL
@@ -217,7 +217,7 @@ AS $detect_kyc$
     SELECT
       e.*,
       'subject_reference', 'KYC_IDENTITY_LINK_MISMATCH', 'KYC_IDENTITY_MISMATCH',
-      '这条事件关联的金客户与来源客户记录，并不是同一个已确认的身份。',
+      'The golden customer and the source customer record on this event are not the same confirmed identity.',
       'HIGH', 'IDENTITY_MISMATCH', 2
     FROM evaluated_rules e
     WHERE e.customer_id IS NOT NULL
@@ -234,7 +234,7 @@ AS $detect_kyc$
     SELECT
       e.*,
       'verification_type', 'KYC_VERIFICATION_TYPE_INVALID', 'KYC_VERIFICATION_TYPE_INVALID',
-      concat('验证类型 ', COALESCE(e.verification_type, 'NULL'), ' 不是可识别的 KYC 验证类型。'),
+      concat('Verification type ', COALESCE(e.verification_type, 'NULL'), ' is not a recognised KYC verification type.'),
       'MEDIUM', NULL::varchar, 3
     FROM evaluated_rules e
     WHERE NOT e.type_is_known
@@ -243,7 +243,7 @@ AS $detect_kyc$
     SELECT
       e.*,
       'verification_status', 'KYC_VERIFICATION_STATUS_INVALID', 'KYC_VERIFICATION_STATUS_INVALID',
-      concat('验证状态 ', COALESCE(e.verification_status, 'NULL'), ' 不是可识别的 KYC 验证状态。'),
+      concat('Verification status ', COALESCE(e.verification_status, 'NULL'), ' is not a recognised KYC verification status.'),
       'MEDIUM', NULL::varchar, 3
     FROM evaluated_rules e
     WHERE NOT e.status_is_known
@@ -253,8 +253,8 @@ AS $detect_kyc$
       e.*,
       'expiry_date', 'KYC_VERIFICATION_EXPIRED', 'KYC_VERIFICATION_EXPIRED',
       concat(
-        '到基准日已失效：状态 ', e.verification_status,
-        '，有效期 ', COALESCE(e.expiry_date::text, 'NULL'), '。'
+        'Expired by the reporting date. Status ', e.verification_status,
+        ', expiry ', COALESCE(e.expiry_date::text, 'NULL'), '.'
       ),
       'HIGH', 'STATUS_DISCREPANCY', 2
     FROM evaluated_rules e
@@ -265,9 +265,9 @@ AS $detect_kyc$
       e.*,
       'verification_status', 'KYC_VERIFICATION_STATUS_DISCREPANCY', 'KYC_VERIFICATION_STATUS_DISCREPANCY',
       concat(
-        '状态为已验证，但按记录的有效期已不能依赖：有效期 ',
-        COALESCE(e.expiry_date::text, '空'),
-        '，验证时间 ', e.verification_date::date::text, '。'
+        'Marked verified, but the recorded expiry no longer supports it. Expiry ',
+        COALESCE(e.expiry_date::text, 'none'),
+        ', verified ', e.verification_date::date::text, '.'
       ),
       'HIGH', 'STATUS_DISCREPANCY', 2
     FROM evaluated_rules e
@@ -277,7 +277,7 @@ AS $detect_kyc$
     SELECT
       e.*,
       'verification_status', 'KYC_VERIFICATION_INCOMPLETE', 'KYC_VERIFICATION_GAP',
-      concat('验证没有完成：状态 ', e.verification_status, '。'),
+      concat('Verification did not complete. Status ', e.verification_status, '.'),
       'MEDIUM', 'KYC_GAP', 3
     FROM evaluated_rules e
     WHERE e.is_gap
@@ -286,13 +286,13 @@ AS $detect_kyc$
     SELECT
       e.*,
       'customer_id', 'KYC_VERIFICATION_UNRESOLVED_IDENTITY', 'KYC_IDENTITY_UNRESOLVED',
-      '这条验证事件挂在来源客户记录上，但金客户尚未确认；报表仍应包含它。',
+      'This verification event sits on a source customer record whose golden customer is not confirmed. The report still has to include it.',
       'LOW', NULL::varchar, 4
     FROM evaluated_rules e
     WHERE e.customer_id IS NULL
       AND e.source_customer_record_id IS NOT NULL
   ),
-  -- 每条记录只留最严重的一条（两个检测函数使用同一套排序口径）
+  -- Keep one finding per record. Both detection functions use this same ranking.
   ranked AS (
     SELECT
       findings.*,
@@ -324,9 +324,9 @@ AS $detect_kyc$
 $detect_kyc$;
 
 COMMENT ON FUNCTION silver.detect_kyc_verification_issues(varchar, date) IS
-  '对一个批次的 KYC 验证事件套用 8 条规则，每条记录只返回最严重的一条发现。批次传 NULL 表示检查全部批次并取最新版本。';
+  'Apply the eight rules to one batch of KYC verification events, returning only the most severe finding per record. A NULL batch checks every batch at its latest version.';
 
--- 第 4 节  AML 筛查规则（10 条）
+-- Section 4: the ten AML screening rules
 
 DROP FUNCTION IF EXISTS silver.detect_aml_screening_issues(varchar, date);
 
@@ -389,19 +389,19 @@ AS $detect_aml$
   evaluated_rules AS (
     SELECT
       evaluated.*,
-      -- 未命中却要求复核，且分数未达警报级 → 状态矛盾
+      -- No hit but flagged for review, with a score below the alert band: contradictory state.
       (
         evaluated.screening_result = 'CLEAR'
         AND evaluated.review_required_flag
         AND COALESCE(evaluated.match_score, 0) < 0.7500
       ) AS is_clear_with_review,
-      -- 未命中却带着警报级分数 → 状态矛盾
+      -- No hit but carrying an alert-band score: contradictory state.
       (
         evaluated.screening_result = 'CLEAR'
         AND evaluated.match_score IS NOT NULL
         AND evaluated.match_score >= 0.7500
       ) AS is_clear_with_alert_score,
-      -- 警报却没标"需要复核" → 状态矛盾
+      -- An alert that was not flagged for review: contradictory state.
       (
         evaluated.result_is_alert
         AND NOT evaluated.review_required_flag
@@ -414,7 +414,7 @@ AS $detect_aml$
       'subject_reference' AS issue_attribute_name,
       'AML_EVENT_SUBJECT_REQUIRED' AS rule_name,
       'AML_SUBJECT_MISSING' AS issue_type,
-      '这条筛查事件既没有金客户也没有来源客户记录，缺少主体引用。' AS issue_description,
+      'This screening event has neither a golden customer nor a source customer record, so it carries no subject reference.' AS issue_description,
       'BLOCKING' AS issue_severity, NULL::varchar AS rule_case_type, 1 AS rule_priority
     FROM evaluated_rules e
     WHERE e.customer_id IS NULL
@@ -424,7 +424,7 @@ AS $detect_aml$
     SELECT
       e.*,
       'subject_reference', 'AML_IDENTITY_LINK_MISMATCH', 'AML_IDENTITY_MISMATCH',
-      '这条筛查事件关联的金客户与来源客户记录，并不是同一个已确认的身份。',
+      'The golden customer and the source customer record on this screening event are not the same confirmed identity.',
       'HIGH', 'IDENTITY_MISMATCH', 2
     FROM evaluated_rules e
     WHERE e.customer_id IS NOT NULL
@@ -441,7 +441,7 @@ AS $detect_aml$
     SELECT
       e.*,
       'screening_type', 'AML_SCREENING_TYPE_INVALID', 'AML_SCREENING_TYPE_INVALID',
-      concat('名单类别 ', COALESCE(e.screening_type, 'NULL'), ' 不是可识别的筛查类型。'),
+      concat('Screening type ', COALESCE(e.screening_type, 'NULL'), ' is not a recognised screening type.'),
       'MEDIUM', NULL::varchar, 3
     FROM evaluated_rules e
     WHERE NOT e.type_is_known
@@ -450,7 +450,7 @@ AS $detect_aml$
     SELECT
       e.*,
       'screening_result', 'AML_SCREENING_RESULT_INVALID', 'AML_SCREENING_RESULT_INVALID',
-      concat('筛查结论 ', COALESCE(e.screening_result, 'NULL'), ' 不是可识别的筛查结论。'),
+      concat('Screening result ', COALESCE(e.screening_result, 'NULL'), ' is not a recognised screening result.'),
       'MEDIUM', NULL::varchar, 3
     FROM evaluated_rules e
     WHERE NOT e.result_is_known
@@ -460,8 +460,8 @@ AS $detect_aml$
       e.*,
       'match_score', 'AML_REVIEW_FLAG_INCONSISTENT', 'AML_REVIEW_FLAG_MISSING',
       concat(
-        '筛查结论 ', e.screening_result,
-        ' 属于警报，但 review_required_flag 为假；疑似命中必须复核。'
+        'Screening result ', e.screening_result,
+        ' is an alert but review_required_flag is false. A suspected hit has to be reviewed.'
       ),
       'HIGH', 'STATUS_DISCREPANCY', 2
     FROM evaluated_rules e
@@ -472,9 +472,9 @@ AS $detect_aml$
       e.*,
       'screening_result', 'AML_REVIEW_REQUIRED', 'AML_SCREENING_ALERT',
       concat(
-        '筛查结论为 ', e.screening_result,
-        '，相似度 ', COALESCE(e.match_score::text, 'NULL'),
-        '；这是需要调查的警报，本身不等于已确认的问题。'
+        'Screening result ', e.screening_result,
+        ', similarity ', COALESCE(e.match_score::text, 'NULL'),
+        '. This is an alert that needs investigation, not a confirmed problem.'
       ),
       'MEDIUM', NULL::varchar, 2
     FROM evaluated_rules e
@@ -485,7 +485,7 @@ AS $detect_aml$
       e.*,
       'review_required_flag', 'AML_CLEAR_SCREENING_WITH_REVIEW', 'AML_STATUS_DISCREPANCY',
       concat(
-        '结论为未命中却要求复核，且相似度未达警报级：',
+        'Result is no match but review is required, with a similarity below the alert band: ',
         COALESCE(e.match_score::text, 'NULL'), '。'
       ),
       'MEDIUM', 'STATUS_DISCREPANCY', 3
@@ -496,7 +496,7 @@ AS $detect_aml$
     SELECT
       e.*,
       'match_score', 'AML_CLEAR_SCREENING_SCORE_INCONSISTENT', 'AML_STATUS_DISCREPANCY',
-      concat('结论为未命中，却带着警报级相似度 ', e.match_score::text, '。'),
+      concat('Result is no match yet it carries an alert-band similarity of ', e.match_score::text, '.'),
       'MEDIUM', 'STATUS_DISCREPANCY', 3
     FROM evaluated_rules e
     WHERE e.is_clear_with_alert_score
@@ -505,7 +505,7 @@ AS $detect_aml$
     SELECT
       e.*,
       'match_score', 'AML_MATCH_SCORE_OUT_OF_RANGE', 'AML_MATCH_SCORE_INVALID',
-      concat('相似度 ', e.match_score::text, ' 超出有效范围 0.0000 到 1.0000。'),
+      concat('Similarity ', e.match_score::text, ' is outside the valid range 0.0000 to 1.0000.'),
       'MEDIUM', NULL::varchar, 3
     FROM evaluated_rules e
     WHERE e.match_score IS NOT NULL
@@ -515,7 +515,7 @@ AS $detect_aml$
     SELECT
       e.*,
       'match_score', 'AML_MATCH_SCORE_MISSING', 'AML_MATCH_SCORE_MISSING',
-      '返回了警报却没有相似度分数，无法判断命中强度。',
+      'An alert is reported with no similarity score, so the strength of the hit cannot be judged.',
       'MEDIUM', NULL::varchar, 3
     FROM evaluated_rules e
     WHERE e.result_is_alert
@@ -525,7 +525,7 @@ AS $detect_aml$
     SELECT
       e.*,
       'customer_id', 'AML_SCREENING_UNRESOLVED_IDENTITY', 'AML_IDENTITY_UNRESOLVED',
-      '这条筛查事件挂在来源客户记录上，但金客户尚未确认；报表仍应包含它。',
+      'This screening event sits on a source customer record whose golden customer is not confirmed. The report still has to include it.',
       'LOW', NULL::varchar, 4
     FROM evaluated_rules e
     WHERE e.customer_id IS NULL
@@ -562,16 +562,16 @@ AS $detect_aml$
 $detect_aml$;
 
 COMMENT ON FUNCTION silver.detect_aml_screening_issues(varchar, date) IS
-  '对一个批次的 AML 筛查事件套用 10 条规则，每条记录只返回最严重的一条发现。批次传 NULL 表示检查全部批次并取最新版本。';
+  'Apply the ten rules to one batch of AML screening events, returning only the most severe finding per record. A NULL batch checks every batch at its latest version.';
 
--- 第 5 节  规则 → 案件类型映射（报告口径的单一来源）
+-- Section 5: rule to case-type mapping, the single source for the reporting rule
 
 CREATE SEQUENCE IF NOT EXISTS silver.compliance_case_seed;
 
--- 报告要求：可报告的 KYC 缺口、身份不匹配、状态矛盾，必须建立
--- KYC_GAP / IDENTITY_MISMATCH / STATUS_DISCREPANCY 三种案件之一。
--- 这个函数就是这条要求的落地处——改口径只改这一处，不用动规则逻辑。
--- 返回 NULL 表示该规则只登记质量问题、不建案件（例如 LOW 级的"身份尚未合并"）。
+-- The report requires a reportable KYC gap, identity mismatch or status discrepancy to open
+-- one of KYC_GAP, IDENTITY_MISMATCH or STATUS_DISCREPANCY.
+-- This function is where that requirement lands, so the mapping changes without touching the rules.
+-- A NULL result means the rule stays a quality record, for example the LOW unresolved identity.
 CREATE OR REPLACE FUNCTION silver.compliance_rule_case_type(
   p_rule_name varchar
 )
@@ -594,16 +594,16 @@ AS $rule_case_type$
 $rule_case_type$;
 
 COMMENT ON FUNCTION silver.compliance_rule_case_type(varchar) IS
-  '规则到案件类型的唯一映射。返回 NULL 表示该规则只登记质量问题、不建案件。';
+  'The single rule-to-case-type mapping. A NULL result means the rule stays a quality record and opens no case.';
 
--- 第 6 节  问题登记
+-- Section 6: finding registration
 
--- 把一条发现登记成 Silver 的数据质量问题。
+-- Register one finding as a Silver data quality issue.
 --
--- 问题编号由"批次 + 规则 + 记录"算出，所以重跑同一批次只会**更新**同一条问题，
--- 不会追加重复行。问题先置为 OPEN；等规则不再报它时，由
--- 05_create_case_processing.sql 置为 RESOLVED。
--- 返回该规则对应的案件类型，供建案步骤使用。
+-- The issue key is derived from batch, rule and record, so a rerun updates that one row
+-- instead of adding another. The issue starts OPEN and is resolved by
+-- 05_create_case_processing.sql once the rules stop reporting it.
+-- Returns the case type for that rule, for the case-opening step to use.
 CREATE OR REPLACE FUNCTION silver.register_compliance_finding(
   p_batch_id varchar,
   p_source_system_id varchar,
@@ -634,8 +634,8 @@ BEGIN
 
   v_case_type := silver.compliance_rule_case_type(p_rule_name);
 
-  -- 案件本身由 05_create_case_processing.sql 建立，所以这里不写案件号，
-  -- 避免本文件依赖下一个文件。
+  -- The case itself is opened by 05_create_case_processing.sql, so no case reference is
+  -- written here, which keeps this file independent of the next one.
   INSERT INTO silver.data_quality_issue (
     data_quality_issue_id, batch_id, source_system_id, verification_case_id,
     validation_run_id, data_layer, entity_name, record_reference,
@@ -662,8 +662,8 @@ END;
 $register_finding$;
 
 COMMENT ON FUNCTION silver.register_compliance_finding(varchar, varchar, varchar, varchar, varchar, varchar, varchar, varchar, text, varchar, varchar) IS
-  '把一条校验发现登记为数据质量问题，并返回该规则对应的案件类型。';
+  'Register one validation finding as a data quality issue and return the case type for its rule.';
 
--- 本模块按 (校验批次, 规则, 记录) 定位并关闭问题，因此为该访问路径建索引。
+-- Issues are located and closed by validation batch, rule and record, so that path is indexed.
 CREATE INDEX IF NOT EXISTS ix_data_quality_issue_run_record
   ON silver.data_quality_issue (validation_run_id, rule_name, record_reference);

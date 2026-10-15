@@ -35,9 +35,13 @@ demonstrated before identity resolution is complete.
 7. `06_create_exception_fact.sql`
 8. `07_create_compliance_reporting_views.sql`
 9. `08_validation_tests.sql`
+10. `09_add_object_descriptions.sql`
 
-`TABLE_COMMENTS_ZH.md` in this directory explains every table and column of the
-module in plain Chinese, table by table and column by column. It is reference
+`09` attaches a description to every table, column, view, function and procedure
+this module owns, so the structure is readable in CloudBeaver without opening the
+scripts. It is idempotent and describes only this module's own objects, so no other
+member's descriptions are touched. `TABLE_COMMENTS.md` in this directory covers the
+same ground in prose, table by table and column by column; it is reference
 documentation and is not executed.
 
 Then execute one call per batch:

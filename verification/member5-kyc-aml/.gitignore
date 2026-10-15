@@ -4,3 +4,6 @@ node_modules/
 
 # Generated report documents are not part of the repository.
 out/
+
+# Personal presentation and report material, kept out of the repository.
+local/

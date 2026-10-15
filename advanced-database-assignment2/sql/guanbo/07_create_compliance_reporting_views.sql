@@ -1,11 +1,11 @@
 -- PostgreSQL 15+
--- Member 5：合规异常报表。定义异常报表、异常汇总、数据血缘三个视图，
--- 以及按报告规则求值的客户 KYC 状态函数。
--- 用普通视图而非物化视图，报表直接读到最新刷新的事实表，无需额外刷新步骤。
+-- Member 5: compliance exception reporting. Defines the exception report, the summary and the
+-- lineage view, plus the customer KYC status function that applies the report's rule.
+-- Plain views rather than materialised ones, so a report reads the latest refresh with no extra step.
 
--- 报告定义的 KYC 状态规则：只有全部所需验证成功且未过期、且没有未结的相关异常，
--- 才是 VERIFIED；其余为 INCOMPLETE、REVIEW_REQUIRED 或 UNKNOWN。
--- 每个金客户一行，按传入的基准日求值，所以做成带参数的函数而不是固定视图。
+-- The report's KYC status rule: VERIFIED only when every required verification succeeded and is
+-- unexpired with no unresolved relevant exception; otherwise INCOMPLETE, REVIEW_REQUIRED or UNKNOWN.
+-- One row per golden customer, evaluated at a given date, which is why it is a function.
 CREATE OR REPLACE FUNCTION silver.customer_kyc_status(
   p_reference_date date DEFAULT current_date
 )
@@ -82,7 +82,7 @@ AS $kyc_status$
       AND investigation_case.customer_id IS NOT NULL
     GROUP BY investigation_case.customer_id
   ),
-  -- 状态单独一步算，避免表函数的输出列名与底层列名冲突。
+  -- Status is computed in its own step to keep output column names from colliding with base ones.
   evaluated_customer AS (
     SELECT
       customer.customer_id,
@@ -126,8 +126,8 @@ $kyc_status$;
 COMMENT ON FUNCTION silver.customer_kyc_status(date) IS
   'One row per golden customer with the report-defined KYC status at a reference date: VERIFIED, INCOMPLETE, REVIEW_REQUIRED or UNKNOWN.';
 
--- 异常报表主视图：一行一笔异常，并带出来源案件的明细。
--- 身份未确认的行通过左连接保留，不丢弃。
+-- The exception report: one row per exception, with the originating case detail behind it.
+-- Rows with an unresolved identity are kept by the left join rather than dropped.
 CREATE OR REPLACE VIEW gold.vw_kyc_aml_exception_report AS
 SELECT
   fact.exception_fact_id,
@@ -171,7 +171,7 @@ LEFT JOIN silver.customer_master customer
 COMMENT ON VIEW gold.vw_kyc_aml_exception_report IS
   'One row per compliance exception with its originating case detail; unresolved identities are retained rather than filtered out.';
 
--- 异常汇总视图：按客户与异常类型统计，供报表汇总区使用。
+-- The summary view: totals by customer and exception type, for the report's summary block.
 CREATE OR REPLACE VIEW gold.vw_compliance_exception_summary AS
 WITH customer_exception AS (
   SELECT
@@ -192,7 +192,7 @@ WITH customer_exception AS (
     )::integer AS resolved_exception_count,
     max(fact.days_open) AS longest_days_open,
     max(fact.as_of_date) AS as_of_date,
-    -- 严重程度是文字标签，按显式等级取最高；按字母排序会把 MEDIUM 排在 HIGH 之上。
+    -- Severity is a label, so the highest is taken by explicit rank: alphabetically MEDIUM beats HIGH.
     max(
       CASE fact.severity
         WHEN 'CRITICAL' THEN 4
@@ -246,7 +246,7 @@ FROM customer_exception;
 COMMENT ON VIEW gold.vw_compliance_exception_summary IS
   'Exception counts and longest open duration per customer, source type and exception type.';
 
--- 数据血缘视图：把 Bronze 原始记录 → Silver 事件 → 案件 → 异常事实串成一条链路。
+-- The lineage view: raw Bronze record to Silver event to case to exception fact, as one chain.
 CREATE OR REPLACE VIEW silver.vw_kyc_aml_exception_lineage AS
 SELECT
   lineage.lineage_id,

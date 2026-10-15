@@ -61,7 +61,7 @@ if (failed > 0) {
 
 console.log("\n2. Member 5 module scripts (run order)");
 const moduleFiles = readdirSync(moduleDir)
-  .filter((name) => /^0[0-8]_.*\.sql$/.test(name))
+  .filter((name) => /^0[0-9]_.*\.sql$/.test(name))
   .sort();
 
 let deferredAssertions = null;
@@ -127,36 +127,30 @@ if (deferredAssertions === null) {
   failed += 1;
 }
 
-// The Chinese comment script must actually attach a comment to every object this
-// The Chinese comment script must actually attach a comment to every object this
-// module owns, so read the comments back out of the catalogue. Relations are
-// resolved through regclass and routines through pg_proc, because
-// obj_description does not accept a function signature.
-console.log("\n4b. Chinese comments on owned objects");
-// The Chinese comment script was removed from the module on request, so this check
-// runs only when that script is present. Without it a freshly built database carries
-// no comments at all, and failing the run for that would be noise rather than signal.
-if (!existsSync(join(moduleDir, "09_add_chinese_comments.sql"))) {
-  console.log("\n4b. Chinese comments on owned objects");
-  console.log("  skipped: 09_add_chinese_comments.sql is not in the module directory");
-} else {
-  try {
-    const missingRelations = await db.query(`
-      WITH owned(kind, relation_name) AS (
-        VALUES
-          ('table', 'silver.kyc_verification_record'),
-          ('table', 'silver.special_verification_case'),
-          ('table', 'silver.aml_screening_result'),
-          ('table', 'silver.aml_case'),
-          ('table', 'gold.fact_compliance_exception'),
-          ('view', 'gold.vw_kyc_aml_exception_report'),
-          ('view', 'gold.vw_compliance_exception_summary'),
-          ('view', 'silver.vw_kyc_aml_exception_lineage')
-      )
-      SELECT owned.kind, owned.relation_name
-      FROM owned
-      WHERE obj_description(owned.relation_name::regclass) IS NULL;`);
-  
+// Every object this module owns should carry a description in the catalogue, so
+// read the comments back out. Relations are resolved through regclass and routines
+// through pg_proc, because obj_description does not accept a function signature.
+//
+// This ran against 09_add_chinese_comments.sql while that script existed. Comments
+// are now part of each module file, so the check reads whatever the module attached.
+console.log("\n4b. descriptions on owned objects");
+try {
+  const missingRelations = await db.query(`
+    WITH owned(kind, relation_name) AS (
+      VALUES
+        ('table', 'silver.kyc_verification_record'),
+        ('table', 'silver.special_verification_case'),
+        ('table', 'silver.aml_screening_result'),
+        ('table', 'silver.aml_case'),
+        ('table', 'gold.fact_compliance_exception'),
+        ('view', 'gold.vw_kyc_aml_exception_report'),
+        ('view', 'gold.vw_compliance_exception_summary'),
+        ('view', 'silver.vw_kyc_aml_exception_lineage')
+    )
+    SELECT owned.kind, owned.relation_name
+    FROM owned
+    WHERE obj_description(owned.relation_name::regclass) IS NULL;`);
+
     const missingRoutines = await db.query(`
       WITH owned(kind, schema_name, routine_name) AS (
         VALUES
@@ -238,7 +232,6 @@ if (!existsSync(join(moduleDir, "09_add_chinese_comments.sql"))) {
     failed += 1;
     console.log(`  FAIL ${error.message}`);
   }
-}
 
 console.log("\n5. reported output");
 const reportQueries = [
