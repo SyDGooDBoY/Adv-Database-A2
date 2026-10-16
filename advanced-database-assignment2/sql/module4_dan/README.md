@@ -1,47 +1,194 @@
-# Member4 – Customer Analytics
+# Module 4: Customer and Portfolio Analytics
 
-PostgreSQL 15+. Run after the shared setup and the Member1, Member2 and Member3 scripts.
+## Purpose
 
-## Run order
+Module 4 turns the trusted customer record and the banking and lending data into daily customer and portfolio reports.
 
-1. `01_load_silver_financials.sql`
-2. `02_load_dim_customer.sql`
-3. `03_customer_financials.sql`
-4. `04_customer_risk_assessment.sql`
-5. `05_customer_snapshot.sql`
-6. `06_reporting_views.sql`
-7. `07_run_reporting_date.sql`
+It loads accounts, loans and transactions into Silver, keeps customer history in a dimension, calculates each customer's financial position, assigns a risk rating, and publishes one snapshot row per customer per day.
 
-Files 01–06 only create the procedures, functions and views. File 07 runs them for 2026-09-15 and loads the data.
+Module 4 does not decide which source records belong to the same customer or which values are trusted. That is handled by Module 2 and Module 3. It also does not produce the KYC/AML results; it reads them from Module 5.
 
-## What the scripts do
+---
 
-`01` loads accounts, loans and transactions from Bronze into Silver. Only records with an ACCEPTED customer match are loaded; the rest are logged as data quality issues.
+## Architecture
 
-`02` keeps customer history in `gold.dim_customer`. A name or status change closes the old version and adds a new one.
+Module 4 operates in the Silver and Gold layers of the Medallion architecture.
 
-`03` calculates each customer's balance, loans, overdraft, debt, exposure and profit. Accounts and loans are summed separately, so nothing is double counted.
-
-`04` gives each customer a risk rating from their exposure and Member5's KYC/AML results, using rules passed in as JSON.
-
-`05` publishes one snapshot row per customer per day in `gold.fact_customer_snapshot`. Rerunning the same date changes nothing.
-
-`06` creates the report views: `v_portfolio_health`, `v_portfolio_risk_distribution` and `v_customer_risk_profile`.
-
-`07` runs steps 01–06 for one date and shows each result. It uses demo risk rules until Member5's rules JSON is agreed.
-
-## Rules JSON
-
-Thresholds are agreed with Member5. Each customer must match exactly one rule.
-
-```json
-{"rule_name": "...", "rule_version": "1",
- "rules": [{"kyc_status": "VERIFIED", "aml_risk_level": "CLEAR",
-            "exposure_min": 0, "exposure_max": 10000,
-            "score": 10, "rating": "LOW",
-            "kyc_risk_rating": "LOW", "aml_risk_rating": "LOW", "reason": "..."}]}
+```text
+Module 1
+Bronze ingestion / CDC
+Module 2 + Module 3
+Unified customer_id + golden customer record
+Module 5
+KYC / AML results
+Module 4
+Silver financials → DIM_CUSTOMER → risk assessment → FACT_CUSTOMER_SNAPSHOT
+Reporting views → dashboard
 ```
 
-## Test
+The module uses the relational model in Silver and a dimensional star schema in Gold: an SCD Type 2 customer dimension and a daily periodic snapshot fact.
 
-After the full run, execute `tests/check_member4.sql`. It only reads data. Every row should show `PASS`.
+---
+
+## Files
+
+### `01_load_silver_financials.sql`
+
+Creates `silver.load_financials(date)`, which loads accounts, loans and transactions from Bronze into Silver.
+
+Main tasks:
+- loads only records whose customer has an `ACCEPTED` match
+- logs records without an accepted match in `silver.data_quality_issue` (ID prefix `FIN-`)
+- can be rerun for the same date without creating duplicates
+
+### `02_load_dim_customer.sql`
+
+Creates `gold.load_dim_customer()`, which keeps customer history in `gold.dim_customer` as SCD Type 2.
+
+```text
+Name or status changes
+→ close the old version (effective_to, current_flag = false)
+→ insert a new current version
+```
+
+### `03_customer_financials.sql`
+
+Creates `gold.customer_financials(date)`, which calculates each customer's:
+
+```text
+total_account_balance
+total_outstanding_loans
+total_overdraft_balance
+total_debt = loans + overdraft
+total_credit_exposure
+net_profit
+```
+
+Accounts and loans are summed separately and then joined, so nothing is double counted.
+
+### `04_customer_risk_assessment.sql`
+
+Creates:
+- `gold.customer_compliance(date)`: reads each customer's KYC status and AML risk level from Module 5's tables
+- `silver.assess_customer_risk(date, rules)`: writes `silver.customer_risk_assessment`
+
+The rules are passed in as JSON. Each customer must match exactly one rule; a combination with no rule stops the run with an error on purpose.
+
+Example rules:
+
+```text
+KYC VERIFIED + AML CLEAR
+→ score 20, LOW
+
+KYC VERIFIED + AML HIGH (open case)
+→ score 90, HIGH
+
+KYC EXPIRED + AML CLEAR
+→ score 75, HIGH
+
+No KYC/AML result + exposure 50,000 or more
+→ score 80, HIGH
+```
+
+The scores are prototype assumptions, not statistical probabilities. Module 5 should confirm them.
+
+### `05_customer_snapshot.sql`
+
+Creates `gold.publish_snapshot(date, rules)`, which publishes `gold.fact_customer_snapshot`: one row per customer per day.
+
+Rerunning the same date with the same data changes nothing. If the result would change, the run stops unless `p_allow_correction => true` is passed, so a published report is never overwritten silently.
+
+### `06_reporting_views.sql`
+
+Creates the report views used by the dashboard:
+
+```text
+gold.v_portfolio_health
+gold.v_portfolio_risk_distribution
+gold.v_customer_risk_profile
+```
+
+### `07_run_reporting_date.sql`
+
+Runs the whole module for 2026-09-15 and shows each result:
+
+```text
+7.1 Load DIM_CUSTOMER
+7.2 Load Silver financials
+7.3 Review and acknowledge data quality issues
+7.4 Customer totals
+7.5 Risk assessment and daily snapshot (8 rules, version "2")
+7.6 Reports
+```
+
+### `test_member4.sql`
+
+Eleven read-only checks. Every row should show `PASS`.
+
+Main test cases:
+- **Totals:** balance 63,700, loans 668,200, debt 669,300 for 10 customers.
+- **Olivia:** balance −1,100 becomes overdraft 1,100; debt 112,400.
+- **LOAN-002:** no accepted customer match, logged as a data quality issue.
+- **Risk:** every customer has exactly one rating (LOW 4 / MEDIUM 4 / HIGH 2 with Module 5 data).
+- **History:** the snapshot uses the DIM_CUSTOMER version valid on the reporting date.
+
+---
+
+## Main Outputs
+
+```text
+silver.banking_account
+silver.loan
+silver.account_transaction
+silver.customer_risk_assessment
+gold.dim_customer
+gold.fact_customer_snapshot
+gold.v_portfolio_health
+gold.v_portfolio_risk_distribution
+gold.v_customer_risk_profile
+```
+
+The main final output of Module 4 is `gold.fact_customer_snapshot`, which the reporting views and the dashboard read.
+
+---
+
+## Run Order
+
+Run the shared setup, Module 1, Module 2, Module 3 (including `CALL silver.apply_member3_survivorship();`) and Module 5 (including its pipeline calls) first.
+
+Then run:
+
+```text
+01_load_silver_financials.sql
+02_load_dim_customer.sql
+03_customer_financials.sql
+04_customer_risk_assessment.sql
+05_customer_snapshot.sql
+06_reporting_views.sql
+07_run_reporting_date.sql
+test_member4.sql
+```
+
+Files 01–06 only create procedures, functions and views. File 07 loads the data.
+
+Module 5 must run before file 07. Otherwise every customer is assessed as `UNKNOWN` and the result is HIGH 4 / MEDIUM 6.
+
+---
+
+## Module 4 vs Module 5
+
+```text
+Module 5:
+What is each customer's KYC and AML status?
+
+Module 4:
+Given that status and the customer's exposure, what is the risk rating, and how does the portfolio look on each day?
+```
+
+---
+
+## Prototype Notes
+
+The risk rules and scores are assumptions created for this prototype and synthetic dataset.
+
+Financial data only runs to 2026-09-15, so the module reports one snapshot date. The design supports one snapshot per day; more dates would show trends in the dashboard.
