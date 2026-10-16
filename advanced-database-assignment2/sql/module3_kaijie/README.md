@@ -20,6 +20,13 @@ history and lineage.
 These source preferences are prototype assumptions for team review,
 not verified bank policies.
 
+## Timestamp Semantics
+When Module 3 updates `customer_master`, `last_updated_at`
+records the processing time, not the source business update time.
+
+Candidate ranking uses `source_last_updated_at`.
+Module 3 provenance and history periods use processing time.
+
 ## Run Order
 Complete shared setup and Modules 1 and 2 first.
 Run files 01 and 02, then:
@@ -31,6 +38,5 @@ Finally, run file 03.
 To demonstrate update history, run Module 3 after B1 and again after B2.
 
 ## Testing
-Local PGlite integration tests passed. Shared PostgreSQL server
-verification is still required. Local tests used a corrected copy
-of Module 2 Step 04 with explicit types for NULL values.
+Local PGlite integration tests passed.
+Verification on the shared PostgreSQL server is still required.
