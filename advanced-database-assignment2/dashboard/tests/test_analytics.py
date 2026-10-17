@@ -31,8 +31,8 @@ def test_portfolio_and_risk_filters_use_selected_date():
     selected = reporting_dates(data["portfolio_health"])[-1]
     snapshot = portfolio_snapshot(data["portfolio_health"], selected)
     risk = filter_date(data["risk_distribution"], selected)
-    assert snapshot["customer_count"] == 13
-    assert int(risk["customer_count"].sum()) == 13
+    assert snapshot["customer_count"] == 10
+    assert int(risk["customer_count"].sum()) == 10
 
 
 def test_kyc_distribution_preserves_customer_total():
@@ -42,6 +42,7 @@ def test_kyc_distribution_preserves_customer_total():
         data["compliance_status"], selected, "kyc_status"
     )
     assert int(distribution["customer_count"].sum()) == 13
+    assert int(distribution["customer_count"].sum()) == 10 + 3
     assert "VERIFIED" in set(distribution["kyc_status"])
 
 

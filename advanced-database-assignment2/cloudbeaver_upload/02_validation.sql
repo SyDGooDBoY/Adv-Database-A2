@@ -1,13 +1,12 @@
 -- =============================================================================
 -- CloudBeaver bundle 02: validation
 -- Target: PostgreSQL 15+ through CloudBeaver
--- Run only after 01_full_deployment.sql has completed successfully.
+-- Run only after 01_full_deployment.sql or 04_update_existing_database_member4_07.sql.
 -- Upload this file to the SQL Editor and execute the whole script with Alt+X.
--- Use a new, empty database for the first deployment.
 -- Source-file boundary comments are retained for error tracing.
 -- =============================================================================
 
--- >>> BEGIN SOURCE FILE: sql/hongfei/07_validation_tests.sql
+-- >>> BEGIN SOURCE FILE: sql/module1_hongfei/07_validation_tests.sql
 
 -- Validates the Member 1 pipeline after scripts 01-06 have run.
 
@@ -211,9 +210,9 @@ FROM silver.data_quality_issue
 WHERE issue_type = 'LOAD_VALIDATION'
 ORDER BY batch_id, detected_at;
 
--- <<< END SOURCE FILE: sql/hongfei/07_validation_tests.sql
+-- <<< END SOURCE FILE: sql/module1_hongfei/07_validation_tests.sql
 
--- >>> BEGIN SOURCE FILE: sql/mina/05_validation_tests.sql
+-- >>> BEGIN SOURCE FILE: sql/module2_mina/05_validation_tests.sql
 
 -- Module 2: CUSTOMER IDENTITY MATCHING
 -- Step 5: Simple validation checks
@@ -324,9 +323,9 @@ ORDER BY
     scr.source_system_id,
     scr.source_customer_reference;
 
--- <<< END SOURCE FILE: sql/mina/05_validation_tests.sql
+-- <<< END SOURCE FILE: sql/module2_mina/05_validation_tests.sql
 
--- >>> BEGIN SOURCE FILE: sql/kaijie/03_validation_tests.sql
+-- >>> BEGIN SOURCE FILE: sql/module3_kaijie/03_validation_tests.sql
 
 -- Run after CALL silver.apply_member3_survivorship().
 -- These structural checks work on B1 or B2. Empty data is a FAIL.
@@ -421,9 +420,9 @@ ORDER BY c.customer_id,p.attribute_name;
 SELECT customer_id,attribute_name,old_value,new_value,effective_from,effective_to,change_reason
 FROM silver.customer_history ORDER BY effective_from,customer_id,attribute_name;
 
--- <<< END SOURCE FILE: sql/kaijie/03_validation_tests.sql
+-- <<< END SOURCE FILE: sql/module3_kaijie/03_validation_tests.sql
 
--- >>> BEGIN SOURCE FILE: sql/guanbo/08_validation_tests.sql
+-- >>> BEGIN SOURCE FILE: sql/module5_guanbo/08_validation_tests.sql
 
 -- PostgreSQL 15+
 -- Member 5 acceptance tests: assert the business result, then print the report-ready queries.
@@ -904,9 +903,9 @@ SELECT
 FROM silver.vw_kyc_aml_exception_lineage
 ORDER BY batch_id, bronze_record_reference;
 
--- <<< END SOURCE FILE: sql/guanbo/08_validation_tests.sql
+-- <<< END SOURCE FILE: sql/module5_guanbo/08_validation_tests.sql
 
--- >>> BEGIN SOURCE FILE: sql/dan/tests/check_member4.sql
+-- >>> BEGIN SOURCE FILE: sql/module4_dan/test_member4.sql
 
 -- Member4 end-to-end checks. Read-only: safe to run on the shared database after the full run.
 -- Checks the latest published snapshot date. Every row should show PASS.
@@ -1003,9 +1002,9 @@ SELECT (SELECT snapshot_date FROM d) AS snapshot_date, check_no, check_name,
 FROM checks
 ORDER BY check_no;
 
--- <<< END SOURCE FILE: sql/dan/tests/check_member4.sql
+-- <<< END SOURCE FILE: sql/module4_dan/test_member4.sql
 
--- >>> BEGIN SOURCE FILE: sql/sunny/05_validation_demo.sql
+-- >>> BEGIN SOURCE FILE: sql/module6_sunny/05_validation_demo.sql
 
 -- Member 6 demonstration. Run after 01, 02 and 04.
 -- Run the entire block in ONE CloudBeaver SQL-editor session; ROLLBACK leaves
@@ -1104,18 +1103,4 @@ ORDER BY batch_id;
 --   has_table_privilege('m6_auditor',
 --     'silver.access_audit_log', 'UPDATE') AS auditor_can_change_log;
 
--- <<< END SOURCE FILE: sql/sunny/05_validation_demo.sql
-
--- >>> BEGIN GENERATED SECTION: Final deployment summary
-
-SELECT table_schema, count(*) AS table_count
-FROM information_schema.tables
-WHERE table_schema IN ('source_systems', 'bronze', 'silver', 'gold')
-GROUP BY table_schema
-ORDER BY table_schema;
-
-SELECT batch_id, source_system_id, load_status
-FROM silver.ingestion_batch
-ORDER BY batch_id;
-
--- <<< END GENERATED SECTION: Final deployment summary
+-- <<< END SOURCE FILE: sql/module6_sunny/05_validation_demo.sql
