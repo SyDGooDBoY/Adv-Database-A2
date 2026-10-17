@@ -12,7 +12,7 @@ def _portfolio_health() -> pd.DataFrame:
     return pd.DataFrame(
         {
             "snapshot_date": DATES,
-            "customer_count": [13, 13, 13],
+            "customer_count": [10, 10, 10],
             "partial_customer_count": [2, 1, 1],
             "unassessed_customer_count": [2, 1, 0],
             "total_account_balance": [482_000, 501_500, 526_800],
@@ -42,22 +42,31 @@ CUSTOMERS = [
 ]
 
 
+def _compliance_labels(customer_id: str) -> tuple[str, str]:
+    """Return deterministic KYC/AML labels for the full identified population."""
+    kyc = "VERIFIED"
+    aml = "CLEAR"
+    if customer_id in {"CUST-004", "CUST-006"}:
+        kyc = "EXPIRED"
+    if customer_id == "CUST-005":
+        aml = "POTENTIAL_MATCH"
+    if customer_id == "CUST-002":
+        kyc = "UNKNOWN"
+    return kyc, aml
+
+
 def _customer_profile() -> pd.DataFrame:
     rows: list[dict[str, object]] = []
     for date_index, snapshot_date in enumerate(DATES):
-        for customer_index, (customer_id, name, status, risk, score) in enumerate(CUSTOMERS):
+        # The financial snapshot contains only customers with an account or loan.
+        for customer_index, (customer_id, name, status, risk, score) in enumerate(
+            CUSTOMERS[:10]
+        ):
             balance = 18_000 + customer_index * 3_400 + date_index * 750
             loan = max(0, 48_000 - customer_index * 2_100 - date_index * 650)
             overdraft = 1_800 if customer_index % 4 == 0 else 0
             debt = loan + overdraft
-            kyc = "VERIFIED"
-            aml = "CLEAR"
-            if customer_id in {"CUST-004", "CUST-006"}:
-                kyc = "EXPIRED"
-            if customer_id == "CUST-005":
-                aml = "POTENTIAL_MATCH"
-            if customer_id == "CUST-002":
-                kyc = "UNKNOWN"
+            kyc, aml = _compliance_labels(customer_id)
             rows.append(
                 {
                     "snapshot_date": snapshot_date,
@@ -92,9 +101,24 @@ def _risk_distribution(profile: pd.DataFrame) -> pd.DataFrame:
     )
 
 
-def _compliance_status(profile: pd.DataFrame) -> pd.DataFrame:
+def _compliance_status() -> pd.DataFrame:
+    # Compliance covers all identified customers, including the three customers
+    # who do not have an account or loan and therefore are not in the snapshot.
+    rows: list[dict[str, object]] = []
+    for snapshot_date in DATES:
+        for customer_id, *_ in CUSTOMERS:
+            kyc, aml = _compliance_labels(customer_id)
+            rows.append(
+                {
+                    "snapshot_date": snapshot_date,
+                    "customer_id": customer_id,
+                    "kyc_status": kyc,
+                    "aml_risk_level": aml,
+                }
+            )
+    population = pd.DataFrame(rows)
     return (
-        profile.groupby(
+        population.groupby(
             ["snapshot_date", "kyc_status", "aml_risk_level"], as_index=False
         )
         .agg(customer_count=("customer_id", "count"))
@@ -157,6 +181,6 @@ def load_demo_data() -> dict[str, pd.DataFrame]:
         "portfolio_health": _portfolio_health(),
         "risk_distribution": _risk_distribution(profile),
         "customer_profile": profile,
-        "compliance_status": _compliance_status(profile),
+        "compliance_status": _compliance_status(),
         "compliance_exceptions": _compliance_exceptions(),
     }

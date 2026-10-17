@@ -3,11 +3,10 @@
 -- Target: PostgreSQL 15+ through CloudBeaver
 -- Optional: run only with administrator approval and CREATE ROLE/table-owner privileges.
 -- Upload this file to the SQL Editor and execute the whole script with Alt+X.
--- Use a new, empty database for the first deployment.
 -- Source-file boundary comments are retained for error tracing.
 -- =============================================================================
 
--- >>> BEGIN SOURCE FILE: sql/sunny/03_security_roles.sql
+-- >>> BEGIN SOURCE FILE: sql/module6_sunny/03_security_roles.sql
 
 -- Member 6: prototype least-privilege database roles for PostgreSQL 15+.
 -- ADMIN-ONLY: run as an owner/administrator after all shared tables exist.
@@ -99,4 +98,4 @@ REVOKE ALL PRIVILEGES ON SCHEMA source_systems, bronze
 -- The database owner must review PUBLIC grants and other role memberships;
 -- REVOKE above cannot remove privileges inherited by those routes.
 
--- <<< END SOURCE FILE: sql/sunny/03_security_roles.sql
+-- <<< END SOURCE FILE: sql/module6_sunny/03_security_roles.sql

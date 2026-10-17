@@ -153,7 +153,7 @@ def render_portfolio(data: dict[str, pd.DataFrame]) -> None:
         ("Total loans", format_currency(snapshot.get("total_outstanding_loans"))),
         ("Total debt", format_currency(snapshot.get("total_debt"))),
         ("Credit exposure", format_currency(snapshot.get("total_credit_exposure"))),
-        ("Net profit", format_currency(snapshot.get("total_net_profit"))),
+        ("Daily net profit", format_currency(snapshot.get("total_net_profit"))),
     ]
     for start in range(0, len(metrics), 3):
         columns = st.columns(3)
@@ -227,7 +227,7 @@ def render_portfolio(data: dict[str, pd.DataFrame]) -> None:
 
 
 def render_risk(data: dict[str, pd.DataFrame]) -> None:
-    selected, _ = page_header(
+    selected, snapshot = page_header(
         "Risk & Compliance",
         "Risk concentration, KYC/AML status and the customers requiring attention.",
         data,
@@ -267,6 +267,21 @@ def render_risk(data: dict[str, pd.DataFrame]) -> None:
 
     kyc = ordered_status_counts(data["compliance_status"], selected, "kyc_status")
     aml = ordered_status_counts(data["compliance_status"], selected, "aml_risk_level")
+    compliance_customers = int(kyc["customer_count"].sum()) if not kyc.empty else 0
+    snapshot_customers = int(safe_number(snapshot.get("customer_count")))
+    customers_without_financial_products = max(
+        compliance_customers - snapshot_customers,
+        0,
+    )
+    st.info(
+        "Population scope: KYC/AML charts include all "
+        f"{compliance_customers:,} identified customers returned by "
+        "gold.customer_compliance(date). Portfolio KPIs and risk charts include "
+        f"the {snapshot_customers:,} customers with an account or loan in the daily "
+        f"snapshot. Therefore, {customers_without_financial_products:,} identified "
+        "customers have no account or loan for this reporting date and are excluded "
+        "from the financial snapshot."
+    )
     left, right = st.columns(2)
     with left:
         figure = px.bar(

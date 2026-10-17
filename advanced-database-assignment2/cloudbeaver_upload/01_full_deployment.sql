@@ -1,9 +1,10 @@
 -- =============================================================================
 -- CloudBeaver bundle 01: full deployment
 -- Target: PostgreSQL 15+ through CloudBeaver
--- Creates the schemas and objects, loads the supplied data, and runs pipeline calls.
+-- Creates schemas and objects, loads supplied synthetic data, runs Member 5,
+-- then publishes Member 4 snapshots for 2026-09-01 and 2026-09-15.
 -- Upload this file to the SQL Editor and execute the whole script with Alt+X.
--- Use a new, empty database for the first deployment.
+-- Use only for a new, empty database.
 -- Source-file boundary comments are retained for error tracing.
 -- =============================================================================
 
@@ -945,7 +946,7 @@ ALTER TABLE gold.fact_customer_snapshot ADD FOREIGN KEY (customer_key) REFERENCE
 
 -- <<< END SOURCE FILE: sql/00_shared_setup/49_add_foreign_keys.sql
 
--- >>> BEGIN SOURCE FILE: sql/hongfei/01_add_incremental_controls.sql
+-- >>> BEGIN SOURCE FILE: sql/module1_hongfei/01_add_incremental_controls.sql
 
 -- Prepares the control objects required by the incremental-load pipeline.
 
@@ -1047,9 +1048,9 @@ ORDER BY source_system_id, completed_at DESC, batch_id DESC;
 COMMENT ON VIEW silver.vw_latest_successful_watermark IS
   'Latest committed watermark per source; failed and running batches are excluded.';
 
--- <<< END SOURCE FILE: sql/hongfei/01_add_incremental_controls.sql
+-- <<< END SOURCE FILE: sql/module1_hongfei/01_add_incremental_controls.sql
 
--- >>> BEGIN SOURCE FILE: sql/hongfei/02_seed_source_data.sql
+-- >>> BEGIN SOURCE FILE: sql/module1_hongfei/02_seed_source_data.sql
 
 -- Seeds the simulated Source layer with idempotent writes.
 -- The invalid CDC-019 operation is preserved to exercise the failure path.
@@ -1410,9 +1411,9 @@ ON CONFLICT (bronze_record_reference) DO NOTHING;
 
 COMMIT;
 
--- <<< END SOURCE FILE: sql/hongfei/02_seed_source_data.sql
+-- <<< END SOURCE FILE: sql/module1_hongfei/02_seed_source_data.sql
 
--- >>> BEGIN SOURCE FILE: sql/hongfei/03_load_initial_bronze.sql
+-- >>> BEGIN SOURCE FILE: sql/module1_hongfei/03_load_initial_bronze.sql
 
 -- Loads initial B1 data into Bronze and publishes successful load controls to Silver.
 
@@ -1596,9 +1597,9 @@ FROM silver.ingestion_batch
 WHERE load_type = 'INITIAL'
 ORDER BY source_system_id;
 
--- <<< END SOURCE FILE: sql/hongfei/03_load_initial_bronze.sql
+-- <<< END SOURCE FILE: sql/module1_hongfei/03_load_initial_bronze.sql
 
--- >>> BEGIN SOURCE FILE: sql/hongfei/04_create_incremental_procedure.sql
+-- >>> BEGIN SOURCE FILE: sql/module1_hongfei/04_create_incremental_procedure.sql
 
 -- Creates the reusable incremental CDC process, including validation, failure logging and watermark control.
 
@@ -2129,9 +2130,9 @@ $process_batch$;
 COMMENT ON PROCEDURE silver.process_incremental_batch(varchar, boolean) IS
   'Stages one simulated CDC batch in Bronze, validates it, publishes valid events to Silver and advances the watermark only after success.';
 
--- <<< END SOURCE FILE: sql/hongfei/04_create_incremental_procedure.sql
+-- <<< END SOURCE FILE: sql/module1_hongfei/04_create_incremental_procedure.sql
 
--- >>> BEGIN SOURCE FILE: sql/hongfei/05_run_failure_retry_demo.sql
+-- >>> BEGIN SOURCE FILE: sql/module1_hongfei/05_run_failure_retry_demo.sql
 
 -- Demonstrates B2-CRM failure, retained Bronze data, retry and idempotency.
 
@@ -2180,9 +2181,9 @@ SELECT
 FROM silver.cdc_change_event
 WHERE batch_id = 'B2-CRM';
 
--- <<< END SOURCE FILE: sql/hongfei/05_run_failure_retry_demo.sql
+-- <<< END SOURCE FILE: sql/module1_hongfei/05_run_failure_retry_demo.sql
 
--- >>> BEGIN SOURCE FILE: sql/hongfei/06_run_remaining_incremental_batches.sql
+-- >>> BEGIN SOURCE FILE: sql/module1_hongfei/06_run_remaining_incremental_batches.sql
 
 -- Processes the remaining incremental batches and displays their outcomes.
 
@@ -2216,9 +2217,9 @@ WHERE batch_id = 'B2-AMLKYC'
   AND issue_type = 'LOAD_VALIDATION'
 ORDER BY detected_at DESC;
 
--- <<< END SOURCE FILE: sql/hongfei/06_run_remaining_incremental_batches.sql
+-- <<< END SOURCE FILE: sql/module1_hongfei/06_run_remaining_incremental_batches.sql
 
--- >>> BEGIN SOURCE FILE: sql/mina/01_standardise_source_customer_records.sql
+-- >>> BEGIN SOURCE FILE: sql/module2_mina/01_standardise_source_customer_records.sql
 
 -- Module 2: CUSTOMER IDENTITY MATCHING
 -- Step 1: Move successful Bronze customer records into Silver
@@ -2365,9 +2366,9 @@ SELECT
 FROM silver.source_customer_record
 ORDER BY source_system_id, source_customer_reference, source_record_version;
 
--- <<< END SOURCE FILE: sql/mina/01_standardise_source_customer_records.sql
+-- <<< END SOURCE FILE: sql/module2_mina/01_standardise_source_customer_records.sql
 
--- >>> BEGIN SOURCE FILE: sql/mina/02_prepare_matching_candidates.sql
+-- >>> BEGIN SOURCE FILE: sql/module2_mina/02_prepare_matching_candidates.sql
 
 -- Module 2: CUSTOMER IDENTITY MATCHING
 -- Step 2: Clean matching fields and create candidate pairs
@@ -2508,9 +2509,9 @@ SELECT *
 FROM silver.v_member2_match_candidates
 ORDER BY source_ref_a, source_ref_b;
 
--- <<< END SOURCE FILE: sql/mina/02_prepare_matching_candidates.sql
+-- <<< END SOURCE FILE: sql/module2_mina/02_prepare_matching_candidates.sql
 
--- >>> BEGIN SOURCE FILE: sql/mina/03_apply_matching_rules.sql
+-- >>> BEGIN SOURCE FILE: sql/module2_mina/03_apply_matching_rules.sql
 
 -- Module 2: CUSTOMER IDENTITY MATCHING
 -- Step 3: Apply simple deterministic matching rules
@@ -2578,9 +2579,9 @@ FROM silver.v_member2_pair_decisions
 WHERE pair_decision <> 'NO_MATCH'
 ORDER BY source_ref_a, source_ref_b;
 
--- <<< END SOURCE FILE: sql/mina/03_apply_matching_rules.sql
+-- <<< END SOURCE FILE: sql/module2_mina/03_apply_matching_rules.sql
 
--- >>> BEGIN SOURCE FILE: sql/mina/04_assign_unified_customers.sql
+-- >>> BEGIN SOURCE FILE: sql/module2_mina/04_assign_unified_customers.sql
 
 -- Module 2: CUSTOMER IDENTITY MATCHING
 -- Step 4: Assign one customer ID to accepted source records
@@ -2898,9 +2899,9 @@ JOIN silver.source_customer_record scr
 WHERE m.is_current_match = TRUE
 ORDER BY scr.source_system_id, scr.source_customer_reference;
 
--- <<< END SOURCE FILE: sql/mina/04_assign_unified_customers.sql
+-- <<< END SOURCE FILE: sql/module2_mina/04_assign_unified_customers.sql
 
--- >>> BEGIN SOURCE FILE: sql/kaijie/01_prepare_survivorship_candidates.sql
+-- >>> BEGIN SOURCE FILE: sql/module3_kaijie/01_prepare_survivorship_candidates.sql
 
 -- PostgreSQL 15+. Install after shared setup and Member 2 scripts 01-04.
 -- Prototype policy v1: source preference is NOT evidence of KYC verification.
@@ -2958,9 +2959,9 @@ CREATE UNIQUE INDEX IF NOT EXISTS member3_one_current_attribute
   ON silver.customer_attribute_source(customer_id, attribute_name) WHERE is_current;
 COMMIT;
 
--- <<< END SOURCE FILE: sql/kaijie/01_prepare_survivorship_candidates.sql
+-- <<< END SOURCE FILE: sql/module3_kaijie/01_prepare_survivorship_candidates.sql
 
--- >>> BEGIN SOURCE FILE: sql/kaijie/02_apply_survivorship.sql
+-- >>> BEGIN SOURCE FILE: sql/module3_kaijie/02_apply_survivorship.sql
 
 -- Install the procedure, then CALL it separately (see README).
 -- Processing-time history: never backdate a decision to the source timestamp.
@@ -3158,16 +3159,16 @@ $procedure$;
 -- Execute separately after installing this file:
 -- CALL silver.apply_member3_survivorship();
 
--- <<< END SOURCE FILE: sql/kaijie/02_apply_survivorship.sql
+-- <<< END SOURCE FILE: sql/module3_kaijie/02_apply_survivorship.sql
 
 -- >>> BEGIN GENERATED SECTION: Member 3 integration call
 
--- Run Member 3 survivorship after its procedure has been created.
+-- Build the golden customer record before downstream dimensions and facts.
 CALL silver.apply_member3_survivorship();
 
 -- <<< END GENERATED SECTION: Member 3 integration call
 
--- >>> BEGIN SOURCE FILE: sql/dan/01_load_silver_financials.sql
+-- >>> BEGIN SOURCE FILE: sql/module4_dan/01_load_silver_financials.sql
 
 -- Step 1: Load accounts, loans and transactions from Bronze into Silver.
 -- Run: CALL silver.load_financials(DATE '2026-09-15');
@@ -3315,9 +3316,9 @@ $$;
 
 COMMIT;
 
--- <<< END SOURCE FILE: sql/dan/01_load_silver_financials.sql
+-- <<< END SOURCE FILE: sql/module4_dan/01_load_silver_financials.sql
 
--- >>> BEGIN SOURCE FILE: sql/dan/02_load_dim_customer.sql
+-- >>> BEGIN SOURCE FILE: sql/module4_dan/02_load_dim_customer.sql
 
 -- Step 2: Keep customer history in DIM_CUSTOMER (SCD Type 2).
 -- Run: CALL gold.load_dim_customer();
@@ -3385,9 +3386,9 @@ $$;
 
 COMMIT;
 
--- <<< END SOURCE FILE: sql/dan/02_load_dim_customer.sql
+-- <<< END SOURCE FILE: sql/module4_dan/02_load_dim_customer.sql
 
--- >>> BEGIN SOURCE FILE: sql/dan/03_customer_financials.sql
+-- >>> BEGIN SOURCE FILE: sql/module4_dan/03_customer_financials.sql
 
 -- Step 3: Calculate each customer's financial totals for one date.
 -- Run: SELECT * FROM gold.customer_financials(DATE '2026-09-15');
@@ -3458,9 +3459,9 @@ $$;
 
 COMMIT;
 
--- <<< END SOURCE FILE: sql/dan/03_customer_financials.sql
+-- <<< END SOURCE FILE: sql/module4_dan/03_customer_financials.sql
 
--- >>> BEGIN SOURCE FILE: sql/dan/04_customer_risk_assessment.sql
+-- >>> BEGIN SOURCE FILE: sql/module4_dan/04_customer_risk_assessment.sql
 
 -- Step 4: Assess each customer's risk from exposure and Member5's KYC/AML results.
 -- Run: CALL silver.assess_customer_risk(DATE '2026-09-15', '<rules json>');
@@ -3560,9 +3561,9 @@ $$;
 
 COMMIT;
 
--- <<< END SOURCE FILE: sql/dan/04_customer_risk_assessment.sql
+-- <<< END SOURCE FILE: sql/module4_dan/04_customer_risk_assessment.sql
 
--- >>> BEGIN SOURCE FILE: sql/dan/05_customer_snapshot.sql
+-- >>> BEGIN SOURCE FILE: sql/module4_dan/05_customer_snapshot.sql
 
 -- Step 5: Publish the daily customer snapshot (FACT_CUSTOMER_SNAPSHOT).
 -- Run: CALL gold.publish_snapshot(DATE '2026-09-15', '<rules json>');
@@ -3653,9 +3654,9 @@ $$;
 
 COMMIT;
 
--- <<< END SOURCE FILE: sql/dan/05_customer_snapshot.sql
+-- <<< END SOURCE FILE: sql/module4_dan/05_customer_snapshot.sql
 
--- >>> BEGIN SOURCE FILE: sql/dan/06_reporting_views.sql
+-- >>> BEGIN SOURCE FILE: sql/module4_dan/06_reporting_views.sql
 
 -- Step 6: Reporting views on the daily snapshots.
 -- Example: SELECT * FROM gold.v_portfolio_health WHERE snapshot_date = DATE '2026-09-15';
@@ -3700,41 +3701,9 @@ LEFT JOIN silver.customer_risk_assessment r ON r.risk_assessment_id = s.risk_ass
 
 COMMIT;
 
--- <<< END SOURCE FILE: sql/dan/06_reporting_views.sql
+-- <<< END SOURCE FILE: sql/module4_dan/06_reporting_views.sql
 
--- >>> BEGIN SOURCE FILE: sql/dan/07_run_reporting_date.sql
-
--- Step 7: Run Member4 for one reporting date (2026-09-15) and show the results.
--- Run after files 01-06. Safe to rerun: the same date gives the same result.
-
--- 7.1 Build customer history.
-CALL gold.load_dim_customer();
-SELECT customer_id, customer_full_name, customer_status, effective_from, current_flag FROM gold.dim_customer ORDER BY customer_id;
-
--- 7.2 Load accounts, loans and transactions into Silver and list data quality issues.
-CALL silver.load_financials(DATE '2026-09-15');
-SELECT entity_name, record_reference, issue_description, issue_status FROM silver.data_quality_issue WHERE validation_run_id = 'FIN-2026-09-15';
-
--- 7.3 LOAN-002 has no ACCEPTED match (Member2 sent it to manual review). Acknowledge it so aggregation can continue without that loan.
-UPDATE silver.data_quality_issue SET issue_status = 'ACKNOWLEDGED', resolved_at = now()
-WHERE validation_run_id = 'FIN-2026-09-15' AND issue_status = 'OPEN';
-
--- 7.4 Customer totals.
-SELECT * FROM gold.customer_financials(DATE '2026-09-15');
-
--- 7.5 Assess risk and publish the daily snapshot. Demo rules until Member5 provides the agreed JSON.
-CALL gold.publish_snapshot(DATE '2026-09-15', '{"rule_name":"demo_rules","rule_version":"1","rules":[
- {"kyc_status":"UNKNOWN","aml_risk_level":"UNKNOWN","exposure_min":0,"exposure_max":50000,"score":50,"rating":"MEDIUM","kyc_risk_rating":"UNKNOWN","aml_risk_rating":"UNKNOWN","reason":"No KYC/AML result yet; exposure below 50000"},
- {"kyc_status":"UNKNOWN","aml_risk_level":"UNKNOWN","exposure_min":50000,"exposure_max":null,"score":80,"rating":"HIGH","kyc_risk_rating":"UNKNOWN","aml_risk_rating":"UNKNOWN","reason":"No KYC/AML result yet; exposure 50000 or more"}]}');
-
--- 7.6 Reports.
-SELECT * FROM gold.v_portfolio_health ORDER BY snapshot_date;
-SELECT * FROM gold.v_portfolio_risk_distribution ORDER BY snapshot_date, risk_rating;
-SELECT * FROM gold.v_customer_risk_profile ORDER BY customer_id, snapshot_date;
-
--- <<< END SOURCE FILE: sql/dan/07_run_reporting_date.sql
-
--- >>> BEGIN SOURCE FILE: sql/guanbo/00_add_compliance_constraints.sql
+-- >>> BEGIN SOURCE FILE: sql/module5_guanbo/00_add_compliance_constraints.sql
 
 -- PostgreSQL 15+
 -- Member 5: CHECK constraints for the case and fact tables, with supporting indexes.
@@ -3917,9 +3886,9 @@ CREATE INDEX IF NOT EXISTS ix_data_quality_issue_case
   ON silver.data_quality_issue (verification_case_id)
   WHERE verification_case_id IS NOT NULL;
 
--- <<< END SOURCE FILE: sql/guanbo/00_add_compliance_constraints.sql
+-- <<< END SOURCE FILE: sql/module5_guanbo/00_add_compliance_constraints.sql
 
--- >>> BEGIN SOURCE FILE: sql/guanbo/01_seed_kyc_aml_bronze.sql
+-- >>> BEGIN SOURCE FILE: sql/module5_guanbo/01_seed_kyc_aml_bronze.sql
 
 -- PostgreSQL 15+
 -- Member 5: the Bronze-layer input for the KYC/AML module.
@@ -4092,9 +4061,9 @@ BEGIN
 END
 $seed_aml_kyc_customer$;
 
--- <<< END SOURCE FILE: sql/guanbo/01_seed_kyc_aml_bronze.sql
+-- <<< END SOURCE FILE: sql/module5_guanbo/01_seed_kyc_aml_bronze.sql
 
--- >>> BEGIN SOURCE FILE: sql/guanbo/02_load_kyc_aml_dimensions.sql
+-- >>> BEGIN SOURCE FILE: sql/module5_guanbo/02_load_kyc_aml_dimensions.sql
 
 -- PostgreSQL 15+
 -- Member 5: create the minimum customer identity that this module's events reference.
@@ -4343,9 +4312,9 @@ $load_identity$;
 COMMENT ON PROCEDURE silver.load_kyc_aml_customer_identity() IS
   'Creates the minimal customer identity required by this module''s KYC and AML events without altering any identity already resolved by Member 2.';
 
--- <<< END SOURCE FILE: sql/guanbo/02_load_kyc_aml_dimensions.sql
+-- <<< END SOURCE FILE: sql/module5_guanbo/02_load_kyc_aml_dimensions.sql
 
--- >>> BEGIN SOURCE FILE: sql/guanbo/03_create_kyc_aml_load_procedures.sql
+-- >>> BEGIN SOURCE FILE: sql/module5_guanbo/03_create_kyc_aml_load_procedures.sql
 
 -- PostgreSQL 15+
 -- Member 5: validate the Bronze KYC verification and AML screening rows and publish them to Silver.
@@ -4759,9 +4728,9 @@ $process_batch$;
 COMMENT ON PROCEDURE silver.process_kyc_aml_batch(varchar, date) IS
   'Member 5 batch entry point: resolve customer identity, publish KYC and AML events to Silver, run the rules and register the findings.';
 
--- <<< END SOURCE FILE: sql/guanbo/03_create_kyc_aml_load_procedures.sql
+-- <<< END SOURCE FILE: sql/module5_guanbo/03_create_kyc_aml_load_procedures.sql
 
--- >>> BEGIN SOURCE FILE: sql/guanbo/04_create_kyc_aml_validation.sql
+-- >>> BEGIN SOURCE FILE: sql/module5_guanbo/04_create_kyc_aml_validation.sql
 
 -- PostgreSQL 15+
 -- Member 5: the KYC/AML validation rules, and registration of findings as data quality issues.
@@ -5433,9 +5402,9 @@ COMMENT ON FUNCTION silver.register_compliance_finding(varchar, varchar, varchar
 CREATE INDEX IF NOT EXISTS ix_data_quality_issue_run_record
   ON silver.data_quality_issue (validation_run_id, rule_name, record_reference);
 
--- <<< END SOURCE FILE: sql/guanbo/04_create_kyc_aml_validation.sql
+-- <<< END SOURCE FILE: sql/module5_guanbo/04_create_kyc_aml_validation.sql
 
--- >>> BEGIN SOURCE FILE: sql/guanbo/05_create_case_processing.sql
+-- >>> BEGIN SOURCE FILE: sql/module5_guanbo/05_create_case_processing.sql
 
 -- PostgreSQL 15+
 -- Member 5: opening cases and moving their status, for verification cases and AML cases.
@@ -5867,9 +5836,9 @@ $progress_cases$;
 COMMENT ON PROCEDURE silver.progress_compliance_cases(date, varchar) IS
   'Resolves findings that the current rules no longer produce and closes the cases whose findings are all cleared.';
 
--- <<< END SOURCE FILE: sql/guanbo/05_create_case_processing.sql
+-- <<< END SOURCE FILE: sql/module5_guanbo/05_create_case_processing.sql
 
--- >>> BEGIN SOURCE FILE: sql/guanbo/06_create_exception_fact.sql
+-- >>> BEGIN SOURCE FILE: sql/module5_guanbo/06_create_exception_fact.sql
 
 -- PostgreSQL 15+
 -- Member 5: the accumulating snapshot fact for compliance exceptions, one row per source case.
@@ -6119,9 +6088,9 @@ $refresh_fact$;
 COMMENT ON PROCEDURE gold.refresh_compliance_exception_fact(date) IS
   'Rebuilds the accumulating compliance exception fact for both case types, updating open cases in place and recalculating days_open to the as-of date.';
 
--- <<< END SOURCE FILE: sql/guanbo/06_create_exception_fact.sql
+-- <<< END SOURCE FILE: sql/module5_guanbo/06_create_exception_fact.sql
 
--- >>> BEGIN SOURCE FILE: sql/guanbo/07_create_compliance_reporting_views.sql
+-- >>> BEGIN SOURCE FILE: sql/module5_guanbo/07_create_compliance_reporting_views.sql
 
 -- PostgreSQL 15+
 -- Member 5: compliance exception reporting. Defines the exception report, the summary and the
@@ -6406,11 +6375,11 @@ WHERE lineage.transformation_name IN (
 COMMENT ON VIEW silver.vw_kyc_aml_exception_lineage IS
   'Traceability path from each retained Bronze KYC/AML record through its published Silver event to the compliance case and exception fact row.';
 
--- <<< END SOURCE FILE: sql/guanbo/07_create_compliance_reporting_views.sql
+-- <<< END SOURCE FILE: sql/module5_guanbo/07_create_compliance_reporting_views.sql
 
 -- >>> BEGIN GENERATED SECTION: Member 5 integration calls
 
--- Publish both supplied AML/KYC batches and their compliance cases.
+-- Publish both supplied AML/KYC batches before Member 4 creates its dated snapshots.
 CALL silver.process_kyc_aml_batch('B1-AMLKYC', DATE '2026-09-30');
 CALL silver.process_kyc_aml_batch('B2-AMLKYC', DATE '2026-09-30');
 CALL silver.publish_compliance_cases();
@@ -6419,7 +6388,7 @@ CALL gold.refresh_compliance_exception_fact(DATE '2026-09-30');
 
 -- <<< END GENERATED SECTION: Member 5 integration calls
 
--- >>> BEGIN SOURCE FILE: sql/guanbo/09_add_object_descriptions.sql
+-- >>> BEGIN SOURCE FILE: sql/module5_guanbo/09_add_object_descriptions.sql
 
 -- PostgreSQL 15+
 -- Member 5: catalogue descriptions for every object this module owns.
@@ -6656,9 +6625,80 @@ COMMENT ON PROCEDURE silver.progress_compliance_cases(date, varchar) IS
 COMMENT ON PROCEDURE gold.refresh_compliance_exception_fact(date) IS
   'Refresh the exception fact for one reporting date, from both case tables. Updating an open case updates its existing row; a stale row whose case is gone is removed.';
 
--- <<< END SOURCE FILE: sql/guanbo/09_add_object_descriptions.sql
+-- <<< END SOURCE FILE: sql/module5_guanbo/09_add_object_descriptions.sql
 
--- >>> BEGIN SOURCE FILE: sql/sunny/01_quality_findings.sql
+-- >>> BEGIN SOURCE FILE: sql/module4_dan/07_run_reporting_date.sql
+
+-- Step 7: Run Member4 for two reporting dates (2026-09-01, then 2026-09-15) and show the results.
+-- Run after files 01-06 and after Module 5. Safe to rerun: 7.0 clears only Member4 data, so the same dates give the same result.
+-- Dates must run oldest first: Silver keeps only the latest date, Gold keeps one snapshot per date.
+
+-- 7.0 Clear Member4 financial and snapshot data (empty on the first run).
+TRUNCATE silver.account_transaction, silver.banking_account, silver.loan, gold.fact_customer_snapshot CASCADE;
+DELETE FROM silver.customer_risk_assessment;
+DELETE FROM silver.data_quality_issue WHERE validation_run_id LIKE 'FIN-%';
+
+-- 7.1 Build customer history.
+CALL gold.load_dim_customer();
+SELECT customer_id, customer_full_name, customer_status, effective_from, current_flag FROM gold.dim_customer ORDER BY customer_id;
+
+-- 7.2 Day 1 (1 Sep): load into Silver and list data quality issues.
+CALL silver.load_financials(DATE '2026-09-01');
+SELECT entity_name, record_reference, issue_description, issue_status FROM silver.data_quality_issue WHERE validation_run_id = 'FIN-2026-09-01';
+
+-- 7.3 Day 1: acknowledge LOAN-002 (no ACCEPTED customer match).
+UPDATE silver.data_quality_issue SET issue_status = 'ACKNOWLEDGED', resolved_at = now()
+WHERE validation_run_id = 'FIN-2026-09-01' AND issue_status = 'OPEN';
+
+-- 7.4 Day 1: customer totals.
+SELECT * FROM gold.customer_financials(DATE '2026-09-01');
+
+-- 7.5 Day 1: assess risk and publish the 1 Sep snapshot (must happen BEFORE loading 15 Sep).
+CALL gold.publish_snapshot(DATE '2026-09-01', '{"rule_name":"demo_rules","rule_version":"2","rules":[
+ {"kyc_status":"UNKNOWN","aml_risk_level":"UNKNOWN","exposure_min":0,"exposure_max":50000,"score":50,"rating":"MEDIUM","kyc_risk_rating":"UNKNOWN","aml_risk_rating":"UNKNOWN","reason":"No KYC/AML result yet; exposure below 50000"},
+ {"kyc_status":"UNKNOWN","aml_risk_level":"UNKNOWN","exposure_min":50000,"exposure_max":null,"score":80,"rating":"HIGH","kyc_risk_rating":"UNKNOWN","aml_risk_rating":"UNKNOWN","reason":"No KYC/AML result yet; exposure 50000 or more"},
+ {"kyc_status":"VERIFIED","aml_risk_level":"CLEAR","exposure_min":0,"exposure_max":null,"score":20,"rating":"LOW","kyc_risk_rating":"LOW","aml_risk_rating":"LOW","reason":"KYC verified; AML screening clear"},
+ {"kyc_status":"VERIFIED","aml_risk_level":"POTENTIAL_MATCH","exposure_min":0,"exposure_max":null,"score":60,"rating":"MEDIUM","kyc_risk_rating":"LOW","aml_risk_rating":"MEDIUM","reason":"KYC verified; AML potential match"},
+ {"kyc_status":"VERIFIED","aml_risk_level":"MEDIUM","exposure_min":0,"exposure_max":null,"score":60,"rating":"MEDIUM","kyc_risk_rating":"LOW","aml_risk_rating":"MEDIUM","reason":"KYC verified; open AML case rated MEDIUM"},
+ {"kyc_status":"VERIFIED","aml_risk_level":"HIGH","exposure_min":0,"exposure_max":null,"score":90,"rating":"HIGH","kyc_risk_rating":"LOW","aml_risk_rating":"HIGH","reason":"KYC verified; open AML case rated HIGH"},
+ {"kyc_status":"EXPIRED","aml_risk_level":"CLEAR","exposure_min":0,"exposure_max":null,"score":75,"rating":"HIGH","kyc_risk_rating":"HIGH","aml_risk_rating":"LOW","reason":"KYC expired; AML screening clear"},
+ {"kyc_status":"MISSING_DOCUMENT","aml_risk_level":"CLEAR","exposure_min":0,"exposure_max":null,"score":75,"rating":"HIGH","kyc_risk_rating":"HIGH","aml_risk_rating":"LOW","reason":"KYC document missing; AML screening clear"}]}');
+
+-- 7.6 Day 2 (15 Sep): load, acknowledge, check totals.
+CALL silver.load_financials(DATE '2026-09-15');
+SELECT entity_name, record_reference, issue_description, issue_status FROM silver.data_quality_issue WHERE validation_run_id = 'FIN-2026-09-15';
+UPDATE silver.data_quality_issue SET issue_status = 'ACKNOWLEDGED', resolved_at = now()
+WHERE validation_run_id = 'FIN-2026-09-15' AND issue_status = 'OPEN';
+SELECT * FROM gold.customer_financials(DATE '2026-09-15');
+
+-- 7.7 Day 2: publish the 15 Sep snapshot.
+CALL gold.publish_snapshot(DATE '2026-09-15', '{"rule_name":"demo_rules","rule_version":"2","rules":[
+ {"kyc_status":"UNKNOWN","aml_risk_level":"UNKNOWN","exposure_min":0,"exposure_max":50000,"score":50,"rating":"MEDIUM","kyc_risk_rating":"UNKNOWN","aml_risk_rating":"UNKNOWN","reason":"No KYC/AML result yet; exposure below 50000"},
+ {"kyc_status":"UNKNOWN","aml_risk_level":"UNKNOWN","exposure_min":50000,"exposure_max":null,"score":80,"rating":"HIGH","kyc_risk_rating":"UNKNOWN","aml_risk_rating":"UNKNOWN","reason":"No KYC/AML result yet; exposure 50000 or more"},
+ {"kyc_status":"VERIFIED","aml_risk_level":"CLEAR","exposure_min":0,"exposure_max":null,"score":20,"rating":"LOW","kyc_risk_rating":"LOW","aml_risk_rating":"LOW","reason":"KYC verified; AML screening clear"},
+ {"kyc_status":"VERIFIED","aml_risk_level":"POTENTIAL_MATCH","exposure_min":0,"exposure_max":null,"score":60,"rating":"MEDIUM","kyc_risk_rating":"LOW","aml_risk_rating":"MEDIUM","reason":"KYC verified; AML potential match"},
+ {"kyc_status":"VERIFIED","aml_risk_level":"MEDIUM","exposure_min":0,"exposure_max":null,"score":60,"rating":"MEDIUM","kyc_risk_rating":"LOW","aml_risk_rating":"MEDIUM","reason":"KYC verified; open AML case rated MEDIUM"},
+ {"kyc_status":"VERIFIED","aml_risk_level":"HIGH","exposure_min":0,"exposure_max":null,"score":90,"rating":"HIGH","kyc_risk_rating":"LOW","aml_risk_rating":"HIGH","reason":"KYC verified; open AML case rated HIGH"},
+ {"kyc_status":"EXPIRED","aml_risk_level":"CLEAR","exposure_min":0,"exposure_max":null,"score":75,"rating":"HIGH","kyc_risk_rating":"HIGH","aml_risk_rating":"LOW","reason":"KYC expired; AML screening clear"},
+ {"kyc_status":"MISSING_DOCUMENT","aml_risk_level":"CLEAR","exposure_min":0,"exposure_max":null,"score":75,"rating":"HIGH","kyc_risk_rating":"HIGH","aml_risk_rating":"LOW","reason":"KYC document missing; AML screening clear"}]}');
+
+-- 7.8 Reports (now two dates).
+SELECT * FROM gold.v_portfolio_health ORDER BY snapshot_date;
+SELECT * FROM gold.v_portfolio_risk_distribution ORDER BY snapshot_date, risk_rating;
+SELECT * FROM gold.v_customer_risk_profile ORDER BY customer_id, snapshot_date;
+
+-- 7.9 What changed between the two dates.
+SELECT coalesce(a.customer_full_name, b.customer_full_name) AS customer,
+       a.risk_rating AS rating_0901, b.risk_rating AS rating_0915,
+       a.total_debt AS debt_0901, b.total_debt AS debt_0915, b.assessment_reason AS reason_0915
+FROM (SELECT * FROM gold.v_customer_risk_profile WHERE snapshot_date = DATE '2026-09-01') a
+FULL JOIN (SELECT * FROM gold.v_customer_risk_profile WHERE snapshot_date = DATE '2026-09-15') b USING (customer_id)
+WHERE a.risk_rating IS DISTINCT FROM b.risk_rating OR a.total_debt IS DISTINCT FROM b.total_debt
+ORDER BY 1;
+
+-- <<< END SOURCE FILE: sql/module4_dan/07_run_reporting_date.sql
+
+-- >>> BEGIN SOURCE FILE: sql/module6_sunny/01_quality_findings.sql
 
 -- Member 6: read-only data-quality monitoring for PostgreSQL 15+.
 -- Run after 00_shared_setup/00-49; Bronze and Silver may still be empty.
@@ -6873,9 +6913,9 @@ SELECT rule_name, data_layer, entity_name, record_reference, severity
 FROM silver.vw_member6_quality_findings
 ORDER BY rule_name, record_reference;
 
--- <<< END SOURCE FILE: sql/sunny/01_quality_findings.sql
+-- <<< END SOURCE FILE: sql/module6_sunny/01_quality_findings.sql
 
--- >>> BEGIN SOURCE FILE: sql/sunny/02_record_quality_issues.sql
+-- >>> BEGIN SOURCE FILE: sql/module6_sunny/02_record_quality_issues.sql
 
 -- Member 6: persist newly detected structural failures in the shared issue table.
 -- Run after 01_quality_findings.sql. One run ID gives idempotent reruns.
@@ -6953,9 +6993,9 @@ COMMENT ON FUNCTION silver.member6_sync_quality_issues(text) IS
 -- SELECT * FROM silver.data_quality_issue
 -- WHERE validation_run_id = 'M6-2026-10-12-01';
 
--- <<< END SOURCE FILE: sql/sunny/02_record_quality_issues.sql
+-- <<< END SOURCE FILE: sql/module6_sunny/02_record_quality_issues.sql
 
--- >>> BEGIN SOURCE FILE: sql/sunny/04_audit_quality_changes.sql
+-- >>> BEGIN SOURCE FILE: sql/module6_sunny/04_audit_quality_changes.sql
 
 -- Member 6: demonstrate automatic auditing of issue INSERT/UPDATE/DELETE.
 -- Run after shared tables exist. The trigger records successful, committed
@@ -7042,4 +7082,4 @@ $member6_attach_protection$;
 COMMENT ON FUNCTION silver.member6_audit_quality_write() IS
   'Audit committed quality-issue row changes using the database login as actor. Does not provide SELECT auditing.';
 
--- <<< END SOURCE FILE: sql/sunny/04_audit_quality_changes.sql
+-- <<< END SOURCE FILE: sql/module6_sunny/04_audit_quality_changes.sql
