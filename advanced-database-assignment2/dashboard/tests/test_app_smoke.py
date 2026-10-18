@@ -24,3 +24,17 @@ def test_all_three_dashboard_pages_render(monkeypatch):
 
     app.radio[0].set_value("Customer Risk Profile").run()
     assert not app.exception
+
+    # Keep the same customer when the date changes.
+    customer_selector = next(
+        widget for widget in app.selectbox if widget.label == "Customer"
+    )
+    customer_selector.set_value("CUST-005").run()
+    date_selector = next(
+        widget for widget in app.selectbox if widget.label == "Reporting date"
+    )
+    date_selector.set_value(date_selector.options[0]).run()
+    customer_selector = next(
+        widget for widget in app.selectbox if widget.label == "Customer"
+    )
+    assert customer_selector.value == "CUST-005"

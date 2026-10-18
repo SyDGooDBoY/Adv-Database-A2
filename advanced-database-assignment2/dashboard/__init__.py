@@ -1,1 +1,1 @@
-"""Advanced Database Assignment 2 dashboard package."""
+"""Customer risk dashboard files."""
