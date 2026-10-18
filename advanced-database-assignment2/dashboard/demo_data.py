@@ -1,4 +1,4 @@
-"""Deterministic synthetic fallback data for UI development and marking demos."""
+"""Example data used when PostgreSQL is not available."""
 
 from __future__ import annotations
 
@@ -43,7 +43,7 @@ CUSTOMERS = [
 
 
 def _compliance_labels(customer_id: str) -> tuple[str, str]:
-    """Return deterministic KYC/AML labels for the full identified population."""
+    """Give one demo customer a KYC and AML status."""
     kyc = "VERIFIED"
     aml = "CLEAR"
     if customer_id in {"CUST-004", "CUST-006"}:
@@ -58,7 +58,7 @@ def _compliance_labels(customer_id: str) -> tuple[str, str]:
 def _customer_profile() -> pd.DataFrame:
     rows: list[dict[str, object]] = []
     for date_index, snapshot_date in enumerate(DATES):
-        # The financial snapshot contains only customers with an account or loan.
+        # Only customers with an account or loan appear in this table.
         for customer_index, (customer_id, name, status, risk, score) in enumerate(
             CUSTOMERS[:10]
         ):
@@ -102,8 +102,7 @@ def _risk_distribution(profile: pd.DataFrame) -> pd.DataFrame:
 
 
 def _compliance_status() -> pd.DataFrame:
-    # Compliance covers all identified customers, including the three customers
-    # who do not have an account or loan and therefore are not in the snapshot.
+    # KYC and AML cover all 13 customers. Three have no account or loan.
     rows: list[dict[str, object]] = []
     for snapshot_date in DATES:
         for customer_id, *_ in CUSTOMERS:
@@ -175,7 +174,7 @@ def _compliance_exceptions() -> pd.DataFrame:
 
 
 def load_demo_data() -> dict[str, pd.DataFrame]:
-    """Return a complete, deterministic in-memory dashboard dataset."""
+    """Create all example tables used by the dashboard."""
     profile = _customer_profile()
     return {
         "portfolio_health": _portfolio_health(),

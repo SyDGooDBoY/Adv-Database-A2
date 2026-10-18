@@ -1,24 +1,34 @@
-# Python dashboard
+# Customer Risk Dashboard
 
-This Streamlit application implements the assignment requirement for at least
-three report/dashboard use cases over the synthetic customer data warehouse.
+This folder contains a Python dashboard made with Streamlit.
 
-## Implemented pages
+The dashboard reads data from PostgreSQL and shows three pages:
 
-| Page / use case | Main visuals | Database contract |
-|---|---|---|
-| Portfolio Overview | Six KPI cards, debt/exposure trend or single-date bars, balance-versus-loans bars | `gold.v_portfolio_health` |
-| Risk & Compliance | Risk donut, debt by risk, KYC and AML distributions, top-ten high-risk customers, compliance exceptions | `gold.v_portfolio_risk_distribution`, `gold.v_customer_risk_profile`, `gold.customer_compliance(date)`, `gold.vw_kyc_aml_exception_report` |
-| Customer Risk Profile | Customer selector, identity/risk cards, financial history or single-date bars, rating-reason table | `gold.v_customer_risk_profile` |
+1. **Portfolio Overview** – customer totals, balances, loans, debt, exposure and daily net profit.
+2. **Risk & Compliance** – risk levels, KYC, AML and high-risk customers.
+3. **Customer Risk Profile** – one customer's details, history and risk reasons.
 
-Every page has a reporting-date filter and a data-cutoff line showing the
-PARTIAL and unassessed customer counts. If only one snapshot date exists, the
-application deliberately uses bar charts instead of misleading trend lines.
-No document number or other direct identity credential is queried or displayed.
+The dashboard never shows document numbers or passwords.
 
-## 1. Install
+## Main files
 
-Python 3.11 or 3.12 is recommended. From this folder in PowerShell:
+| File | What it does |
+|---|---|
+| `app.py` | Builds the three Streamlit pages. |
+| `database.py` | Connects to PostgreSQL and runs the SQL queries. |
+| `analytics.py` | Filters dates and prepares data for charts. |
+| `demo_data.py` | Provides example data when the database is unavailable. |
+| `.env` | Stores the local database login. Do not upload this file. |
+| `run_dashboard.ps1` | Starts the dashboard on Windows. |
+| `tests/` | Contains the automatic tests. |
+
+## First-time setup
+
+Open PowerShell in this `dashboard` folder.
+
+### 1. Create a Python environment
+
+The environment keeps this project's Python packages separate from other projects.
 
 ```powershell
 py -3.12 -m venv .venv
@@ -27,61 +37,152 @@ python -m pip install --upgrade pip
 pip install -r requirements.txt
 ```
 
-## 2. Configure PostgreSQL
+You only need to do this once.
 
-CloudBeaver is the database UI; the Python app connects to the same underlying
-PostgreSQL database. It does not connect to the CloudBeaver web URL.
+### 2. Create the database settings file
 
 ```powershell
 Copy-Item .env.example .env
+notepad .env
 ```
 
-Edit `.env` and enter the PostgreSQL host, port, database, username and password.
-The `.env` file is ignored by Git. The database account needs read access to the
-Gold reporting views and the referenced Silver/Gold functions and tables.
-
-For UI development without database access, set:
+For the local Docker setup used by this project, the file normally looks like this:
 
 ```text
-DASHBOARD_USE_DEMO_DATA=true
+DB_HOST=localhost
+DB_PORT=5432
+DB_NAME=postgres
+DB_USER=student
+DB_PASSWORD=your_password
+DB_SSLMODE=prefer
+
+DASHBOARD_USE_DEMO_DATA=false
+DASHBOARD_ALLOW_DEMO_FALLBACK=true
 ```
 
-Demo mode is clearly labelled in the sidebar and uses deterministic synthetic
-data over three dates. For assignment screenshots, use the PostgreSQL warehouse
-unless you explicitly state that the screenshot is a UI mock-up.
+Important:
 
-## 3. Run
+- Use `localhost` because the dashboard runs on Windows.
+- CloudBeaver uses `postgres` as its host because CloudBeaver runs inside Docker.
+- Do not put the CloudBeaver website address or port `8978` in `.env`.
+- Do not share or commit the real password.
+
+## Start the dashboard
+
+Run:
 
 ```powershell
 .\run_dashboard.ps1
 ```
 
-Or run directly:
+Then open:
 
-```powershell
-.\.venv\Scripts\python.exe -m streamlit run app.py
+```text
+http://localhost:8501
 ```
 
-Streamlit normally opens `http://localhost:8501`.
+To stop the dashboard, return to PowerShell and press `Ctrl+C`.
 
-## 4. Test
+## Refresh the data
+
+Click **Refresh data** in the left sidebar after changing PostgreSQL data.
+
+The dashboard normally keeps data for 60 seconds before reading it again.
+
+## Run the tests
 
 ```powershell
 .\.venv\Scripts\python.exe -m pytest -q
 ```
 
-The automated tests check the reporting-date filters, portfolio/risk totals,
-KYC distribution, high-risk ranking and customer history behavior.
+The tests check:
 
-## Suggested report evidence
+- all three pages can open;
+- date filters work;
+- changing a date keeps the selected customer when possible;
+- portfolio and risk totals are correct;
+- KYC and AML counts are correct;
+- high-risk customers are sorted by debt.
 
-Capture one screenshot of each page with the data-source label visible:
+All tests should show `passed`.
 
-1. Portfolio Overview: KPI cards plus balance/loan comparison.
-2. Risk & Compliance: risk distribution, KYC/AML charts and high-risk table.
-3. Customer Risk Profile: selected customer cards, financial chart and the
-   explainable rating-reason table.
+## Use example data
 
-In the written findings, note the selected reporting date, whether the warehouse
-contains one or multiple snapshot dates, the number of PARTIAL/unassessed
-customers, the largest risk/debt concentration, and any open KYC/AML exceptions.
+If PostgreSQL is unavailable, open `.env` and set:
+
+```text
+DASHBOARD_USE_DEMO_DATA=true
+```
+
+Restart the dashboard. The sidebar will say **Synthetic demo data**.
+
+For final assignment screenshots, use the real PostgreSQL data:
+
+```text
+DASHBOARD_USE_DEMO_DATA=false
+DASHBOARD_ALLOW_DEMO_FALLBACK=false
+```
+
+This makes database problems visible instead of silently using example data.
+
+## What the numbers mean
+
+- Portfolio and risk charts use customers in `gold.fact_customer_snapshot`.
+- KYC and AML charts use all identified customers from `gold.customer_compliance(date)`.
+- On 15 September 2026, KYC/AML includes 13 customers. The financial snapshot includes 10 customers. The other 3 customers have no account or loan for that date.
+- If the database has only one report date, the dashboard shows bars instead of a trend line.
+- With both 1 September and 15 September loaded, the dashboard shows trend lines.
+
+## Common problems
+
+### The page stays on "Loading dashboard data"
+
+A CloudBeaver transaction may be holding a database lock.
+
+1. Cancel the running query in CloudBeaver.
+2. Disconnect and reconnect `PostgreSQL@localhost`.
+3. Stop the dashboard with `Ctrl+C`.
+4. Start it again with `.\run_dashboard.ps1`.
+5. Open a new browser tab and go to `http://localhost:8501`.
+
+### Only 15 September appears
+
+Run `04_update_existing_database_member4_07.sql` in CloudBeaver, then run:
+
+```sql
+SELECT snapshot_date, count(*)
+FROM gold.fact_customer_snapshot
+GROUP BY snapshot_date
+ORDER BY snapshot_date;
+```
+
+The result should contain:
+
+```text
+2026-09-01 | 9
+2026-09-15 | 10
+```
+
+Click **Refresh data** in the dashboard after the SQL finishes.
+
+### The dashboard shows example data
+
+Check the PostgreSQL details in `.env`. Make sure:
+
+```text
+DB_HOST=localhost
+DB_PORT=5432
+DB_NAME=postgres
+```
+
+Also make sure the PostgreSQL Docker container is running.
+
+## Suggested assignment screenshots
+
+Take one screenshot from each page:
+
+1. Portfolio Overview with the KPI cards and trend chart.
+2. Risk & Compliance with the risk, KYC and AML charts.
+3. Customer Risk Profile with one selected customer and the rating reason table.
+
+Keep the data source and selected date visible in each screenshot.

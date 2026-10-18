@@ -1,4 +1,4 @@
-"""PostgreSQL connection and read-only dashboard queries."""
+"""Connect to PostgreSQL and read the dashboard data."""
 
 from __future__ import annotations
 
@@ -27,7 +27,7 @@ class DatabaseConfig:
 
 
 def database_config_from_env() -> DatabaseConfig:
-    """Build connection settings without exposing credentials in source code."""
+    """Read the database settings from the .env file."""
     required = {
         "DB_HOST": os.getenv("DB_HOST"),
         "DB_NAME": os.getenv("DB_NAME"),
@@ -52,7 +52,7 @@ def database_config_from_env() -> DatabaseConfig:
 
 
 def build_engine(config: DatabaseConfig | None = None) -> Engine:
-    """Create a SQLAlchemy engine for the project PostgreSQL database."""
+    """Open a connection to the PostgreSQL database."""
     settings = config or database_config_from_env()
     url = URL.create(
         drivername="postgresql+psycopg",
@@ -92,9 +92,8 @@ FROM gold.v_customer_risk_profile
 ORDER BY snapshot_date, customer_id
 """
 
-# This evaluates KYC/AML from the current Member 5 Silver records for each Gold
-# snapshot date. It remains useful when the original snapshot was created before
-# Member 5 was loaded and therefore stored UNKNOWN statuses.
+# Count current KYC and AML results for every report date.
+# This also includes identified customers who have no account or loan.
 COMPLIANCE_STATUS_SQL = """
 WITH reporting_dates AS (
   SELECT DISTINCT snapshot_date
@@ -128,7 +127,7 @@ def _read(engine: Engine, query: str) -> pd.DataFrame:
 
 
 def load_dashboard_data(engine: Engine | None = None) -> dict[str, pd.DataFrame]:
-    """Load every read-only dataset used by the three dashboard pages."""
+    """Run all dashboard queries and return their results."""
     owned_engine = engine is None
     connection = engine or build_engine()
     try:

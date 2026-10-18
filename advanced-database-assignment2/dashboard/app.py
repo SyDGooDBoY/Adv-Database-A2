@@ -1,4 +1,4 @@
-"""Streamlit dashboard for the Advanced Database Assignment 2 warehouse."""
+"""Start the Streamlit customer risk dashboard."""
 
 from __future__ import annotations
 
@@ -45,7 +45,7 @@ st.markdown(
     """
     <style>
       .stApp { background: #f7f9fc; }
-      /* Hide Streamlit's top-right Deploy control and overflow menu. */
+      /* Hide Streamlit buttons that this dashboard does not use. */
       [data-testid="stDeployButton"],
       [data-testid="stMainMenu"],
       #MainMenu {
@@ -82,12 +82,12 @@ def _as_bool(name: str, default: bool) -> bool:
 
 @st.cache_data(ttl=60, show_spinner="Loading dashboard data...")
 def load_app_data() -> tuple[dict[str, pd.DataFrame], str, str | None]:
-    """Load PostgreSQL data, with an explicitly labelled demo fallback."""
+    """Read PostgreSQL data, or use demo data when allowed."""
     if _as_bool("DASHBOARD_USE_DEMO_DATA", False):
         return load_demo_data(), "Synthetic demo data", None
     try:
         return load_dashboard_data(), "PostgreSQL warehouse", None
-    except Exception as exc:  # surfaced to the user with no credentials included
+    except Exception as exc:  # Show the error, but never show the password.
         if _as_bool("DASHBOARD_ALLOW_DEMO_FALLBACK", True):
             return load_demo_data(), "Synthetic demo data (fallback)", str(exc)
         raise
@@ -382,10 +382,16 @@ def render_customer(data: dict[str, pd.DataFrame]) -> None:
         .drop_duplicates()
         .itertuples(index=False)
     }
+    customer_options = sorted(labels)
+    customer_state_key = "customer_risk_profile_customer"
+    if st.session_state.get(customer_state_key) not in customer_options:
+        st.session_state[customer_state_key] = customer_options[0]
+
     selected_customer = st.selectbox(
         "Customer",
-        options=sorted(labels),
+        options=customer_options,
         format_func=lambda customer_id: labels[customer_id],
+        key=customer_state_key,
     )
     history = customer_history(profile, selected_customer, selected)
     latest = latest_customer_row(history)
