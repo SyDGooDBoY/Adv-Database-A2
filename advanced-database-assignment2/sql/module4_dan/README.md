@@ -90,7 +90,7 @@ The run stops with an error if the JSON is missing a section, if a customer's KY
 
 Version "3" replaced the earlier 8-row decision table (version "2"). It gives every current customer exactly the same score, rating and reason, and also covers combinations the decision table did not list (for example EXPIRED + open AML case).
 
-The scores are prototype assumptions, not statistical probabilities. Module 5 should confirm them.
+The scores are prototype assumptions, not statistical probabilities. 
 
 ### `05_customer_snapshot.sql`
 
