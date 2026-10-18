@@ -27,12 +27,12 @@ const here = dirname(fileURLToPath(import.meta.url));
 const sqlRoot = join(here, "..", "..", "advanced-database-assignment2", "sql");
 
 const MODULES = [
-  { key: "hongfei", label: "Member 1 - incremental load" },
-  { key: "mina", label: "Member 2 - identity matching" },
-  { key: "kaijie", label: "Member 3 - survivorship" },
-  { key: "guanbo", label: "Member 5 - KYC/AML", mine: true },
-  { key: "dan", label: "Member 4 - analytics" },
-  { key: "sunny", label: "Member 6 - security and audit" },
+  { key: "module1_hongfei", label: "Member 1 - incremental load" },
+  { key: "module2_mina", label: "Member 2 - identity matching" },
+  { key: "module3_kaijie", label: "Member 3 - survivorship" },
+  { key: "module5_guanbo", label: "Member 5 - KYC/AML", mine: true },
+  { key: "module4_dan", label: "Member 4 - analytics" },
+  { key: "module6_sunny", label: "Member 6 - security and audit" },
 ];
 
 const TEST_FILE = /validation_tests|validation_demo/;
@@ -154,7 +154,7 @@ console.log("\n-- Member 4: its own run script, which runs its whole flow for on
 // recorded and reported without stopping the rest of the verification. The
 // current failure is that 7.1 calls gold.load_dim_customer(), which needs the
 // financial data that 7.2 loads, so the two steps are the wrong way round.
-await runFile("dan/07_run_reporting_date.sql", join(sqlRoot, "dan", "07_run_reporting_date.sql"), { optional: true });
+await runFile("dan/07_run_reporting_date.sql", join(sqlRoot, "module4_dan", "07_run_reporting_date.sql"), { optional: true });
 console.log("\n-- Member 5 (mine): the five pipeline calls");
 await sql("process_kyc_aml_batch B1-AMLKYC", "CALL silver.process_kyc_aml_batch('B1-AMLKYC', DATE '2026-09-30');");
 await sql("process_kyc_aml_batch B2-AMLKYC", "CALL silver.process_kyc_aml_batch('B2-AMLKYC', DATE '2026-09-30');");

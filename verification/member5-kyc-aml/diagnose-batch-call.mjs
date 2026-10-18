@@ -25,9 +25,9 @@ const run = async (label, path) => {
 for (const name of readdirSync(join(sqlRoot, "00_shared_setup")).filter((n) => n.endsWith(".sql")).sort()) {
   if (Number.parseInt(name.slice(0, 2), 10) <= 49) await run(name, join(sqlRoot, "00_shared_setup", name));
 }
-for (const name of readdirSync(join(sqlRoot, "hongfei")).filter((n) => n.endsWith(".sql")).sort()) {
+for (const name of readdirSync(join(sqlRoot, "module1_hongfei")).filter((n) => n.endsWith(".sql")).sort()) {
   if (/05_run_|06_run_|07_validation/.test(name)) continue; // call them ourselves
-  await run(`hongfei/${name}`, join(sqlRoot, "hongfei", name));
+  await run(`hongfei/${name}`, join(sqlRoot, "module1_hongfei", name));
 }
 
 const state = async (label) => {

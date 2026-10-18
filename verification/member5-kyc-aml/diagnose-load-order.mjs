@@ -41,13 +41,13 @@ for (const name of files("00_shared_setup")) {
 console.log(`after shared setup        : ${await batches()}`);
 
 // Member 1 loads itself, then report after every single file.
-for (const name of files("hongfei")) {
-  await step(`hongfei/${name}`, join(sqlRoot, "hongfei", name));
+for (const name of files("module1_hongfei")) {
+  await step(`hongfei/${name}`, join(sqlRoot, "module1_hongfei", name));
   console.log(`after hongfei/${name.padEnd(38)}: ${await batches()}`);
 }
 
 // Now the other modules, in the harness order, reporting after each file.
-for (const key of ["mina", "kaijie", "guanbo", "dan", "sunny"]) {
+for (const key of ["module2_mina", "module3_kaijie", "module5_guanbo", "module4_dan", "module6_sunny"]) {
   for (const name of files(key)) {
     await step(`${key}/${name}`, join(sqlRoot, key, name));
     console.log(`after ${key}/${name.padEnd(44)}: ${await batches()}`);

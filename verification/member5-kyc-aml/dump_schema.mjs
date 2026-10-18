@@ -15,8 +15,8 @@ const run = async (path) => db.exec(readFileSync(path, "utf8"));
 for (const name of readdirSync(join(sqlRoot, "00_shared_setup")).filter((n) => n.endsWith(".sql")).sort()) {
   if (Number.parseInt(name.slice(0, 2), 10) <= 49) await run(join(sqlRoot, "00_shared_setup", name));
 }
-for (const name of readdirSync(join(sqlRoot, "guanbo")).filter((n) => n.endsWith(".sql") && !/08_/.test(n)).sort()) {
-  await run(join(sqlRoot, "guanbo", name));
+for (const name of readdirSync(join(sqlRoot, "module5_guanbo")).filter((n) => n.endsWith(".sql") && !/08_/.test(n)).sort()) {
+  await run(join(sqlRoot, "module5_guanbo", name));
 }
 
 const OWNED = [
