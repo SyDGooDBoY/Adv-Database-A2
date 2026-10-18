@@ -72,23 +72,23 @@ Creates:
 - `gold.customer_compliance(date)`: reads each customer's KYC status and AML risk level from Module 5's tables
 - `silver.assess_customer_risk(date, rules)`: writes `silver.customer_risk_assessment`
 
-The rules are passed in as JSON. Each customer must match exactly one rule; a combination with no rule stops the run with an error on purpose.
-
-Example rules:
+The rules are passed in as a JSON weighted scorecard (`demo_scorecard`, version "3"). Each KYC status and AML risk level has its own points, so every combination gets a score without listing combinations one by one:
 
 ```text
-KYC VERIFIED + AML CLEAR
-→ score 20, LOW
+score = base 20 + KYC points + AML points (+ exposure points), capped at 100
 
-KYC VERIFIED + AML HIGH (open case)
-→ score 90, HIGH
+KYC:  VERIFIED 0 | UNKNOWN 15 | EXPIRED 55 | MISSING_DOCUMENT 55
+AML:  CLEAR 0 | FALSE_POSITIVE 0 | UNKNOWN 15 | LOW 20 | POTENTIAL_MATCH 40 | MEDIUM 40 | HIGH 70 | CRITICAL 80
+Exposure (only when KYC and AML are both UNKNOWN): below 50,000 → 0 | 50,000 or more → 30
 
-KYC EXPIRED + AML CLEAR
-→ score 75, HIGH
-
-No KYC/AML result + exposure 50,000 or more
-→ score 80, HIGH
+Rating: below 50 LOW | 50-74 MEDIUM | 75 or more HIGH
 ```
+
+Examples: VERIFIED + CLEAR = 20 LOW; VERIFIED + open MEDIUM AML case = 60 MEDIUM; EXPIRED + CLEAR = 75 HIGH; no KYC/AML result with exposure 50,000 or more = 80 HIGH.
+
+The run stops with an error if the JSON is missing a section, if a customer's KYC or AML value has no points, or if a score falls in no rating band (or more than one). Each assessment stores the rule name, version and a reason built from the KYC, AML and exposure parts.
+
+Version "3" replaced the earlier 8-row decision table (version "2"). It gives every current customer exactly the same score, rating and reason, and also covers combinations the decision table did not list (for example EXPIRED + open AML case).
 
 The scores are prototype assumptions, not statistical probabilities. Module 5 should confirm them.
 
@@ -118,7 +118,7 @@ Runs the whole module for two reporting dates, 2026-09-01 and then 2026-09-15, a
 7.2 1 Sep: load Silver financials and list data quality issues
 7.3 1 Sep: review and acknowledge data quality issues
 7.4 1 Sep: customer totals
-7.5 1 Sep: risk assessment and daily snapshot (8 rules, version "2")
+7.5 1 Sep: risk assessment (weighted scorecard, version "3") and daily snapshot
 7.6 15 Sep: load, acknowledge and customer totals
 7.7 15 Sep: risk assessment and daily snapshot
 7.8 Reports for both dates
