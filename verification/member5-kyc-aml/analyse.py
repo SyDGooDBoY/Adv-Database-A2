@@ -4,7 +4,7 @@ for dangling references across the module."""
 import re
 from pathlib import Path
 
-MODULE = Path(__file__).resolve().parents[2] / "advanced-database-assignment2" / "sql" / "guanbo"
+MODULE = Path(__file__).resolve().parents[2] / "advanced-database-assignment2" / "sql" / "module5_guanbo"
 files = sorted(MODULE.glob("*.sql"))
 texts = {f.name: f.read_text(encoding="utf-8") for f in files}
 all_text = "\n".join(texts.values())

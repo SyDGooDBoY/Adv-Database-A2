@@ -10,7 +10,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const here = dirname(fileURLToPath(import.meta.url));
-const moduleDir = join(here, "..", "..", "advanced-database-assignment2", "sql", "guanbo");
+const moduleDir = join(here, "..", "..", "advanced-database-assignment2", "sql", "module5_guanbo");
 
 // python is used for two static checks. It is resolved explicitly, because a
 // bundled interpreter is often not on PATH, and a quoted absolute path with
