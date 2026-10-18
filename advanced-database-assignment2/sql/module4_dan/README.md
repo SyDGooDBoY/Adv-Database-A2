@@ -90,7 +90,7 @@ No KYC/AML result + exposure 50,000 or more
 → score 80, HIGH
 ```
 
-The scores are prototype assumptions, not statistical probabilities. Module 5 should confirm them.
+The scores are prototype assumptions, not statistical probabilities.
 
 ### `05_customer_snapshot.sql`
 
