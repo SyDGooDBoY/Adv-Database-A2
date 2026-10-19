@@ -70,7 +70,6 @@ ORDER BY display_order;
 -- =====================================================================
 -- @@SILVER  (Member 2 matching, Member 3 golden record, Member 5 KYC/AML, Member 4 financial load)
 -- =====================================================================
-
 -- @@S1 RUN: matching result (24 ACCEPTED, 1 PENDING_REVIEW)
 SELECT match_status, manual_review_flag, count(*) AS records
 FROM silver.customer_source_match WHERE is_current_match GROUP BY 1, 2 ORDER BY 1;
@@ -81,7 +80,7 @@ SELECT customer_id, customer_full_name, customer_status FROM silver.customer_mas
 -- @@S3 RUN: KYC/AML result per customer (Member 5)
 SELECT * FROM gold.customer_compliance(DATE '2026-09-15') ORDER BY 1;
 
--- KEY CODE  module4_dan/01_load_silver_financials.sql – only ACCEPTED matches are loaded;
+-- KEY CODE module4_dan/01_load_silver_financials.sql – only ACCEPTED matches are loaded;
 -- anything else is logged as a data quality issue instead of being dropped silently.
 -- @@S4 RUN: LOAN-002 logged on both dates
 SELECT validation_run_id, entity_name, record_reference, issue_description, issue_status
@@ -91,25 +90,22 @@ FROM silver.data_quality_issue WHERE validation_run_id LIKE 'FIN-%' ORDER BY 1;
 -- @@GOLD  (Member 4 star schema + Member 5 compliance exceptions)
 -- =====================================================================
 
--- @@G1 RUN: star schema – fact joined to dimension, two dates
-SELECT f.snapshot_date, d.customer_full_name, f.total_debt, f.risk_score, f.risk_rating, f.kyc_status, f.aml_risk_level
-FROM gold.fact_customer_snapshot f JOIN gold.dim_customer d ON d.customer_key = f.customer_key
-ORDER BY d.customer_full_name, f.snapshot_date;
+-- @@G1 [MAIN] RUN: snapshot fact – the three named customers, both snapshot dates (Mia only on 15 Sep)
+SELECT m.customer_full_name, f.snapshot_date, f.risk_rating,
+       f.total_debt, f.net_profit
+FROM gold.fact_customer_snapshot f
+JOIN silver.customer_master m ON m.customer_id = f.customer_id
+WHERE m.customer_full_name IN ('Olivia Brooks','Leo Martin','Mia Rivera')
+ORDER BY m.customer_full_name, f.snapshot_date;
 
--- @@G2 RUN: portfolio by rating (15 Sep: LOW 4 / MEDIUM 4 / HIGH 2)
-SELECT * FROM gold.v_portfolio_risk_distribution ORDER BY snapshot_date, risk_rating;
+-- @@G2 [MAIN] RUN: exception fact – one row per exception, with its age (2 OPEN 29 days, 1 CLOSED 15 days)
+SELECT customer_name, exception_type, exception_status, severity, days_open
+FROM gold.vw_kyc_aml_exception_report ORDER BY days_open DESC;
 
--- @@G3 RUN: what changed between the dates (Olivia LOW -> MEDIUM, Mia new)
-SELECT coalesce(a.customer_full_name, b.customer_full_name) AS customer,
-       a.risk_rating AS rating_0901, b.risk_rating AS rating_0915,
-       a.total_debt AS debt_0901, b.total_debt AS debt_0915
-FROM (SELECT * FROM gold.v_customer_risk_profile WHERE snapshot_date = DATE '2026-09-01') a
-FULL JOIN (SELECT * FROM gold.v_customer_risk_profile WHERE snapshot_date = DATE '2026-09-15') b USING (customer_id)
-WHERE a.risk_rating IS DISTINCT FROM b.risk_rating OR a.total_debt IS DISTINCT FROM b.total_debt
-ORDER BY 1;
-
--- @@G4 RUN: compliance exceptions (Member 5)
-SELECT * FROM gold.vw_compliance_exception_summary;
+-- @@G3 [MAIN] RUN: customer KYC status under the reporting rule (VERIFIED 7 / REVIEW_REQUIRED 2 / UNKNOWN 4)
+SELECT kyc_status, count(*)::int AS customers
+FROM silver.customer_kyc_status(DATE '2026-09-30')
+GROUP BY kyc_status ORDER BY kyc_status;
 
 -- =====================================================================
 -- @@DASHBOARD  switch to http://localhost:8501 (click "Refresh data" first)
